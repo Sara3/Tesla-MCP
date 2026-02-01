@@ -1,6 +1,4 @@
 node_modules
-src
-*.ts
 .env
 .env.*
 keys/
@@ -9,3 +7,4 @@ keys/
 *.md
 docs/
 .github/
+build/
