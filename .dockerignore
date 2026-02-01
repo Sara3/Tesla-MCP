@@ -1,0 +1,11 @@
+node_modules
+src
+*.ts
+.env
+.env.*
+keys/
+.git
+.gitignore
+*.md
+docs/
+.github/

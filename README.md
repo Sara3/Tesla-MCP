@@ -209,16 +209,132 @@ If you encounter issues:
 - Use the `debug_vehicles` command to get detailed information about your vehicles
 - Check the server logs in the terminal where you're running the MCP server
 
+## HTTP/SSE Mode (Multi-User Hosted Server)
+
+The server can also run in HTTP/SSE mode, allowing you to host it as a web service that supports multiple users. **Each user brings their own Tesla Developer App credentials** - no pre-configuration required!
+
+### Running in HTTP Mode
+
+```bash
+# Build first
+npm run build
+
+# Run the HTTP server
+npm run start:http
+```
+
+Or for development:
+
+```bash
+npm run dev:http
+```
+
+### Environment Variables for HTTP Mode
+
+```env
+PORT=3000                           # Optional, default 3000
+HOST=0.0.0.0                        # Optional, default 0.0.0.0
+BASE_URL=https://your-domain.com    # Required for production (for OAuth redirect)
+```
+
+**Note:** No Tesla credentials are needed to start the server. Each user provides their own credentials through the web UI.
+
+### HTTP Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Server info and documentation |
+| `/health` | GET | Health check endpoint |
+| `/sse?session=SESSION_ID` | GET | SSE endpoint for MCP client connection |
+| `/messages?sessionId=SESSION_ID` | POST | Message endpoint for MCP requests |
+| `/auth/login?session=SESSION_ID` | GET | Start Tesla OAuth flow |
+| `/auth/callback` | GET | OAuth callback (internal) |
+| `/auth/session` | POST | Create a new session and get auth URL |
+
+### How Multi-User Auth Works
+
+1. **Client Connects**: MCP client connects to `/sse` endpoint
+2. **Session Created**: Server creates a session and returns session ID
+3. **Setup Required**: User visits `/setup` to enter their Tesla Developer App credentials (Client ID & Secret)
+4. **User Authenticates**: User is redirected to Tesla's OAuth login page
+5. **Tokens Stored**: Server stores tokens for that session
+6. **Tools Available**: MCP tools now work with user's Tesla account
+
+Each user needs to:
+1. Create an app at [developer.tesla.com](https://developer.tesla.com)
+2. Set the redirect URI to `YOUR_SERVER_URL/auth/callback`
+3. Enter their Client ID and Client Secret in the setup page
+
+### Connecting MCP Clients
+
+For clients that support HTTP/SSE transport, configure them with:
+
+```
+SSE URL: https://your-domain.com/sse?session=YOUR_SESSION_ID
+Messages URL: https://your-domain.com/messages?sessionId=YOUR_SESSION_ID
+```
+
+### Deploy to Render (Recommended)
+
+The easiest way to deploy is using Render:
+
+1. **Push to GitHub** (if not already):
+   ```bash
+   git add .
+   git commit -m "Add HTTP server with user auth"
+   git push origin main
+   ```
+
+2. **Deploy on Render**:
+   - Go to [render.com](https://render.com) and sign up/login
+   - Click **New** → **Web Service**
+   - Connect your GitHub repo
+   - Configure:
+     - **Build Command**: `npm install && npm run build`
+     - **Start Command**: `npm run start:http`
+   - Add environment variable:
+     - `BASE_URL` = `https://your-app-name.onrender.com` (use your actual Render URL)
+   - Click **Create Web Service**
+
+3. **Get your public URL**: Render will give you a URL like `https://tesla-mcp-xxxx.onrender.com`
+
+4. **Tell users** to set their Tesla Developer App redirect URI to:
+   ```
+   https://your-app-name.onrender.com/auth/callback
+   ```
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+
+### Alternative: Docker Deployment
+
+```bash
+# Build the image
+docker build -t tesla-mcp .
+
+# Run with your public URL
+docker run -p 3000:3000 \
+  -e BASE_URL=https://your-domain.com \
+  tesla-mcp
+```
+
+### Production Considerations
+
+- **HTTPS Required**: Tesla OAuth requires HTTPS (Render provides this automatically)
+- **BASE_URL**: Must be set to your public URL for OAuth redirects to work
+- **No credentials needed**: Users provide their own Tesla Developer credentials
+
 ## Command Line Tools
 
 The server includes several helpful scripts:
 
-- `pnpm build`: Compile the TypeScript code
-- `pnpm start`: Run the server using the run-mcp.js script
-- `pnpm register`: Register your app with Tesla's API
-- `pnpm get-token`: Get a refresh token from Tesla
-- `pnpm test-api`: Test your connection to the Tesla API
-- `pnpm inspector`: Run the server with the MCP Inspector for debugging
+- `npm run build`: Compile the TypeScript code
+- `npm run start`: Run the stdio MCP server
+- `npm run start:http`: Run the HTTP/SSE MCP server
+- `npm run dev:http`: Run HTTP server in development mode
+- `npm run register`: Register your app with Tesla's API
+- `npm run get-token`: Get a refresh token from Tesla
+- `npm run test-api`: Test your connection to the Tesla API
+- `npm run inspector`: Run the server with the MCP Inspector for debugging
 
 ## API Limitations
 

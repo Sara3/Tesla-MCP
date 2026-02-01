@@ -1,0 +1,18 @@
+# Render Blueprint - Tesla MCP Server
+# Deploy with: https://render.com/deploy
+
+services:
+  - type: web
+    name: tesla-mcp
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:http
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: BASE_URL
+        sync: false  # User must set this to their Render URL
+    healthCheckPath: /health
+    autoDeploy: true

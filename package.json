@@ -5,28 +5,33 @@
   "private": true,
   "type": "module",
   "bin": {
-    "tesla-mcp-server": "./build/index.js"
+    "tesla-mcp-server": "./build/index.js",
+    "tesla-mcp-http": "./build/httpServer.js"
   },
   "files": [
     "build"
   ],
   "scripts": {
-    "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+    "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755'); require('fs').chmodSync('build/httpServer.js', '755');\"",
     "prepare": "npm run build",
     "watch": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
     "get-token": "node --loader ts-node/esm src/getRefreshToken.ts",
     "test-api": "node --loader ts-node/esm src/testConnection.ts",
     "register": "node src/register.js",
-    "start": "node run-mcp.js"
+    "start": "node run-mcp.js",
+    "start:http": "node build/httpServer.js",
+    "dev:http": "node --loader ts-node/esm src/httpServer.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.7.0",
+    "@modelcontextprotocol/sdk": "^1.7.0",
     "axios": "^1.8.2",
+    "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^5.0.1"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.5",
     "ts-node": "^10.9.2",
