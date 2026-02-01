@@ -217,8 +217,8 @@ function createMCPServer(sessionId: string): Server {
                 }
             },
             {
-                name: "list_cars",
-                description: "List your Tesla vehicles and get their IDs. Use these IDs with wake_up, get_vehicle_location, etc.",
+                name: "list_vehicles",
+                description: "List your Tesla vehicles and get their IDs (id, vehicle_id, vin). Use these with wake_up, get_vehicle_location, etc.",
                 inputSchema: {
                     type: "object",
                     properties: {},
@@ -260,7 +260,7 @@ function createMCPServer(sessionId: string): Server {
                 };
             }
 
-            case "list_cars": {
+            case "list_vehicles": {
                 if (!teslaService.hasCredentials()) {
                     return {
                         content: [{

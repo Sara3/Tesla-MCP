@@ -99,7 +99,7 @@ Configure your MCP client to run the server command (e.g. `node run-mcp.js`). Ge
 |------|-------------|
 | **get_setup_url** | Get the URL to set up Tesla Developer credentials |
 | **get_auth_url** | Get the URL to connect your Tesla account (after setup) |
-| **list_cars** | List vehicles and their IDs (use with other tools) |
+| **list_vehicles** | List vehicles and their IDs (use with other tools) |
 | **get_vehicle_location** | Current location (lat/long + Google Maps link); takes `vehicle_id` |
 | **wake_up** | Wake a vehicle; takes `vehicle_id` |
 | **refresh_vehicles** | Refresh the vehicle list from the API |
