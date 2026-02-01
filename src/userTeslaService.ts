@@ -77,8 +77,8 @@ export class UserTeslaService {
                 ...(response.data.refresh_token && { refreshToken: response.data.refresh_token })
             });
         } catch (error: any) {
-            const errorDetails = error.response?.data || error.message;
-            throw new Error(`Failed to refresh token: ${JSON.stringify(errorDetails)}`);
+            const msg = error.response?.data?.error_description ?? error.response?.data?.error ?? error.message;
+            throw new Error(`Failed to refresh token: ${String(msg)}`);
         }
     }
 

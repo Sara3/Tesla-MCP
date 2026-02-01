@@ -43,6 +43,11 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
+// Optional: server Tesla app (if set, users go straight to Tesla login — no setup page)
+const SERVER_CLIENT_ID = process.env.TESLA_CLIENT_ID;
+const SERVER_CLIENT_SECRET = process.env.TESLA_CLIENT_SECRET;
+const HAS_SERVER_CREDENTIALS = !!(SERVER_CLIENT_ID && SERVER_CLIENT_SECRET);
+
 // OAuth constants
 const AUTH_URL = 'https://auth.tesla.com/oauth2/v3';
 const SCOPES = 'openid offline_access vehicle_device_data vehicle_cmds vehicle_charging_cmds';
@@ -235,37 +240,49 @@ function createMCPServer(sessionId: string): Server {
 
         switch (request.params.name) {
             case "get_setup_url": {
-                return {
-                    content: [{
-                        type: "text",
-                        text: `Set up your Tesla Developer App credentials:\n\n**Open this link:** ${BASE_URL}/setup?session=${sessionId}\n\n1. Create an app at https://developer.tesla.com\n2. Set redirect URI to: ${BASE_URL}/auth/callback\n3. Enter your Client ID and Client Secret on the setup page`
-                    }]
-                };
-            }
-
-            case "get_auth_url": {
-                if (!teslaService.hasCredentials()) {
+                const loginUrl = `${BASE_URL}/auth/login?session=${sessionId}`;
+                if (HAS_SERVER_CREDENTIALS) {
                     return {
                         content: [{
                             type: "text",
-                            text: `Set up credentials first: ${BASE_URL}/setup?session=${sessionId}`
+                            text: `Log in with your Tesla account:\n\n**Open this link:** ${loginUrl}\n\nAfter you connect, use the connection URL from the success page as your MCP server URL so you stay logged in. Keep it private.`
                         }]
                     };
                 }
                 return {
                     content: [{
                         type: "text",
-                        text: `Connect your Tesla account:\n\n**Open this link:** ${BASE_URL}/auth/login?session=${sessionId}`
+                        text: `Set up your Tesla Developer App credentials:\n\n**Open this link:** ${BASE_URL}/setup?session=${sessionId}\n\n1. Create an app at https://developer.tesla.com\n2. Set redirect URI to: ${BASE_URL}/auth/callback\n3. Enter your Client ID and Client Secret on the setup page\n\nAfter you connect Tesla, the success page will show a **connection URL**. Add that URL as your MCP server URL in your client so you stay logged in across reconnects. Keep it private.`
+                    }]
+                };
+            }
+
+            case "get_auth_url": {
+                const loginUrl = `${BASE_URL}/auth/login?session=${sessionId}`;
+                if (HAS_SERVER_CREDENTIALS || teslaService.hasCredentials()) {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: `Log in with your Tesla account:\n\n**Open this link:** ${loginUrl}`
+                        }]
+                    };
+                }
+                return {
+                    content: [{
+                        type: "text",
+                        text: `Set up credentials first: ${BASE_URL}/setup?session=${sessionId}`
                     }]
                 };
             }
 
             case "list_vehicles": {
-                if (!teslaService.hasCredentials()) {
+                const loginUrl = `${BASE_URL}/auth/login?session=${sessionId}`;
+                const setupUrl = `${BASE_URL}/setup?session=${sessionId}`;
+                if (!HAS_SERVER_CREDENTIALS && !teslaService.hasCredentials()) {
                     return {
                         content: [{
                             type: "text",
-                            text: `Please set up your credentials first: ${BASE_URL}/setup?session=${sessionId}`
+                            text: `Set up credentials first: ${setupUrl}`
                         }]
                     };
                 }
@@ -273,7 +290,7 @@ function createMCPServer(sessionId: string): Server {
                     return {
                         content: [{
                             type: "text",
-                            text: `Not authenticated. Please visit: ${BASE_URL}/auth/login?session=${sessionId}`
+                            text: `Log in with your Tesla account:\n\n**Open this link:** ${loginUrl}`
                         }]
                     };
                 }
@@ -298,11 +315,13 @@ function createMCPServer(sessionId: string): Server {
             }
 
             case "get_vehicle_location": {
-                if (!teslaService.hasCredentials()) {
+                const loginUrl = `${BASE_URL}/auth/login?session=${sessionId}`;
+                const setupUrl = `${BASE_URL}/setup?session=${sessionId}`;
+                if (!HAS_SERVER_CREDENTIALS && !teslaService.hasCredentials()) {
                     return {
                         content: [{
                             type: "text",
-                            text: `Please set up your credentials first: ${BASE_URL}/setup?session=${sessionId}`
+                            text: `Set up credentials first: ${setupUrl}`
                         }]
                     };
                 }
@@ -310,7 +329,7 @@ function createMCPServer(sessionId: string): Server {
                     return {
                         content: [{
                             type: "text",
-                            text: `Not authenticated. Please visit: ${BASE_URL}/auth/login?session=${sessionId}`
+                            text: `Log in with your Tesla account:\n\n**Open this link:** ${loginUrl}`
                         }]
                     };
                 }
@@ -355,11 +374,13 @@ function createMCPServer(sessionId: string): Server {
             }
 
             case "wake_up": {
-                if (!teslaService.hasCredentials()) {
+                const wakeLoginUrl = `${BASE_URL}/auth/login?session=${sessionId}`;
+                const wakeSetupUrl = `${BASE_URL}/setup?session=${sessionId}`;
+                if (!HAS_SERVER_CREDENTIALS && !teslaService.hasCredentials()) {
                     return {
                         content: [{
                             type: "text",
-                            text: `Please set up your credentials first: ${BASE_URL}/setup?session=${sessionId}`
+                            text: `Set up credentials first: ${wakeSetupUrl}`
                         }]
                     };
                 }
@@ -367,7 +388,7 @@ function createMCPServer(sessionId: string): Server {
                     return {
                         content: [{
                             type: "text",
-                            text: `Not authenticated. Please visit: ${BASE_URL}/auth/login?session=${sessionId}`
+                            text: `Log in with your Tesla account:\n\n**Open this link:** ${wakeLoginUrl}`
                         }]
                     };
                 }
@@ -404,11 +425,13 @@ function createMCPServer(sessionId: string): Server {
             }
 
             case "refresh_vehicles": {
-                if (!teslaService.hasCredentials()) {
+                const refLoginUrl = `${BASE_URL}/auth/login?session=${sessionId}`;
+                const refSetupUrl = `${BASE_URL}/setup?session=${sessionId}`;
+                if (!HAS_SERVER_CREDENTIALS && !teslaService.hasCredentials()) {
                     return {
                         content: [{
                             type: "text",
-                            text: `Please set up your credentials first: ${BASE_URL}/setup?session=${sessionId}`
+                            text: `Set up credentials first: ${refSetupUrl}`
                         }]
                     };
                 }
@@ -416,7 +439,7 @@ function createMCPServer(sessionId: string): Server {
                     return {
                         content: [{
                             type: "text",
-                            text: `Not authenticated. Please visit: ${BASE_URL}/auth/login?session=${sessionId}`
+                            text: `Log in with your Tesla account:\n\n**Open this link:** ${refLoginUrl}`
                         }]
                     };
                 }
@@ -431,11 +454,13 @@ function createMCPServer(sessionId: string): Server {
             }
 
             case "debug_vehicles": {
-                if (!teslaService.hasCredentials()) {
+                const dbgLoginUrl = `${BASE_URL}/auth/login?session=${sessionId}`;
+                const dbgSetupUrl = `${BASE_URL}/setup?session=${sessionId}`;
+                if (!HAS_SERVER_CREDENTIALS && !teslaService.hasCredentials()) {
                     return {
                         content: [{
                             type: "text",
-                            text: `Please set up your credentials first: ${BASE_URL}/setup?session=${sessionId}`
+                            text: `Set up credentials first: ${dbgSetupUrl}`
                         }]
                     };
                 }
@@ -443,7 +468,7 @@ function createMCPServer(sessionId: string): Server {
                     return {
                         content: [{
                             type: "text",
-                            text: `Not authenticated. Please visit: ${BASE_URL}/auth/login?session=${sessionId}`
+                            text: `Log in with your Tesla account:\n\n**Open this link:** ${dbgLoginUrl}`
                         }]
                     };
                 }
@@ -500,20 +525,21 @@ function createMCPServer(sessionId: string): Server {
 
         const teslaService = createUserTeslaService(sessionId);
 
-        if (!teslaService.hasCredentials()) {
+        const loginUrl = `${BASE_URL}/auth/login?session=${sessionId}`;
+        const setupUrl = `${BASE_URL}/setup?session=${sessionId}`;
+        if (!HAS_SERVER_CREDENTIALS && !teslaService.hasCredentials()) {
             return {
                 messages: [
                     {
                         role: "user",
                         content: {
                             type: "text",
-                            text: `Please set up your Tesla Developer credentials first by visiting: ${BASE_URL}/setup?session=${sessionId}`
+                            text: `Set up your Tesla Developer credentials first: ${setupUrl}`
                         }
                     }
                 ]
             };
         }
-
         if (!teslaService.isAuthenticated()) {
             return {
                 messages: [
@@ -521,7 +547,7 @@ function createMCPServer(sessionId: string): Server {
                         role: "user",
                         content: {
                             type: "text",
-                            text: `Please authenticate with Tesla first by visiting: ${BASE_URL}/auth/login?session=${sessionId}`
+                            text: `Log in with your Tesla account:\n\nOpen this link: ${loginUrl}`
                         }
                     }
                 ]
@@ -729,11 +755,24 @@ const successSvg = `
 // SSE endpoint - client connects here to receive messages
 // The MCP SDK sends its own sessionId to the client in the "endpoint" event,
 // so we must store the transport under that ID for POST /messages to find it.
+// Use ?token=XXX or ?session=XXX to reuse an existing session (avoids re-auth on reconnect).
 app.get('/sse', async (req: Request, res: Response) => {
-    // Get or create user session (for Tesla auth / credentials)
-    let userSessionId = req.query.session as string;
-    
-    if (!userSessionId || !sessionManager.getSession(userSessionId)) {
+    const token = req.query.token as string;
+    const sessionParam = req.query.session as string;
+
+    let userSessionId: string;
+
+    if (token) {
+        const existing = sessionManager.getSessionByToken(token);
+        if (existing) {
+            userSessionId = existing.sessionId;
+        } else {
+            const session = sessionManager.createSession();
+            userSessionId = session.sessionId;
+        }
+    } else if (sessionParam && sessionManager.getSession(sessionParam)) {
+        userSessionId = sessionParam;
+    } else {
         const session = sessionManager.createSession();
         userSessionId = session.sessionId;
     }
@@ -784,10 +823,14 @@ app.post('/messages', async (req: Request, res: Response) => {
 app.get('/setup', (req: Request, res: Response) => {
     let sessionId = req.query.session as string;
     
-    // Create session if not provided
     if (!sessionId || !sessionManager.getSession(sessionId)) {
         const session = sessionManager.createSession();
         sessionId = session.sessionId;
+    }
+
+    // If server has Tesla app credentials, go straight to login page
+    if (HAS_SERVER_CREDENTIALS) {
+        return res.redirect(`${BASE_URL}/auth/login?session=${sessionId}`);
     }
 
     res.send(`
@@ -805,11 +848,13 @@ app.get('/setup', (req: Request, res: Response) => {
         <h1>Setup Tesla Developer Credentials</h1>
         <p>To use Tesla MCP, you need to create a Tesla Developer App and enter your credentials below.</p>
         
+        <p style="font-size: 13px; margin-bottom: 16px; color: rgba(255,255,255,0.8);">In your Tesla Developer App, set the Redirect URI to <strong>exactly</strong>:</p>
+        <div class="session-id" style="margin-bottom: 20px;">${BASE_URL}/auth/callback</div>
         <ol class="steps">
             <li>Go to <a href="https://developer.tesla.com" target="_blank">developer.tesla.com</a></li>
-            <li>Create a new application</li>
-            <li>Set the Redirect URI to: <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px;">${BASE_URL}/auth/callback</code></li>
-            <li>Copy your Client ID and Client Secret below</li>
+            <li>Create or open your application</li>
+            <li>Set Redirect URI to the URL above (copy it exactly)</li>
+            <li>Enter your Client ID and Client Secret below</li>
         </ol>
         
         <form method="POST" action="/setup">
@@ -856,8 +901,33 @@ app.post('/setup', (req: Request, res: Response) => {
         clientSecret: client_secret,
     });
 
-    // Redirect to auth login
-    res.redirect(`/auth/login?session=${session}`);
+    // Show confirmation so users know credentials were saved
+    const loginUrl = `${BASE_URL}/auth/login?session=${session}`;
+    const redirectUri = `${BASE_URL}/auth/callback`;
+    res.send(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Credentials saved</title>
+    <style>${commonStyles}</style>
+</head>
+<body>
+    <div class="container">
+        ${successSvg}
+        <h1 style="color: #4CAF50;">Credentials saved successfully</h1>
+        <p>Your <strong>Client ID</strong> and <strong>Client Secret</strong> were saved for this session. You can now log in with your Tesla account.</p>
+        <p style="font-size: 13px; color: rgba(255,255,255,0.7);">If setup keeps asking again, verify:</p>
+        <ul style="text-align: left; margin: 12px 0; color: rgba(255,255,255,0.8); font-size: 13px;">
+            <li>Client ID and Secret are correct (from developer.tesla.com)</li>
+            <li>Redirect URI in your Tesla app is exactly: <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 12px;">${redirectUri}</code></li>
+        </ul>
+        <a href="${loginUrl}" class="btn">Continue to Tesla login</a>
+    </div>
+</body>
+</html>
+    `);
 });
 
 // ============================================
@@ -868,19 +938,31 @@ app.post('/setup', (req: Request, res: Response) => {
 app.get('/auth/login', (req: Request, res: Response) => {
     let sessionId = req.query.session as string;
     
-    // Create session if not provided
     if (!sessionId || !sessionManager.getSession(sessionId)) {
         const session = sessionManager.createSession();
         sessionId = session.sessionId;
-        // Redirect to setup since no credentials
-        return res.redirect(`/setup?session=${sessionId}`);
+        if (!HAS_SERVER_CREDENTIALS) {
+            return res.redirect(`${BASE_URL}/setup?session=${sessionId}`);
+        }
     }
 
-    const session = sessionManager.getSession(sessionId);
+    let session = sessionManager.getSession(sessionId);
     
-    // Check if credentials are set
-    if (!session?.clientId || !session?.clientSecret) {
-        return res.redirect(`/setup?session=${sessionId}`);
+    // Use server credentials if session doesn't have any
+    if ((!session?.clientId || !session?.clientSecret) && HAS_SERVER_CREDENTIALS) {
+        sessionManager.updateSession(sessionId, {
+            clientId: SERVER_CLIENT_ID,
+            clientSecret: SERVER_CLIENT_SECRET,
+        });
+        session = sessionManager.getSession(sessionId);
+    } else if (!session?.clientId || !session?.clientSecret) {
+        return res.redirect(`${BASE_URL}/setup?session=${sessionId}`);
+    }
+
+    const clientId = session?.clientId;
+    const clientSecret = session?.clientSecret;
+    if (!clientId || !clientSecret) {
+        return res.redirect(`${BASE_URL}/setup?session=${sessionId}`);
     }
 
     // Generate OAuth state and PKCE
@@ -891,7 +973,7 @@ app.get('/auth/login', (req: Request, res: Response) => {
     
     // Build Tesla OAuth URL
     const authUrl = new URL(`${AUTH_URL}/authorize`);
-    authUrl.searchParams.set('client_id', session.clientId);
+    authUrl.searchParams.set('client_id', clientId);
     authUrl.searchParams.set('redirect_uri', redirectUri);
     authUrl.searchParams.set('response_type', 'code');
     authUrl.searchParams.set('scope', SCOPES);
@@ -998,6 +1080,9 @@ app.get('/auth/callback', async (req: Request, res: Response) => {
             tokenExpiration: Date.now() + (expires_in * 1000),
         });
 
+        const connectionToken = sessionManager.createConnectionToken(sessionId);
+        const connectionUrl = `${BASE_URL}/sse?token=${connectionToken}`;
+
         // Success page
         res.send(`
 <!DOCTYPE html>
@@ -1012,14 +1097,12 @@ app.get('/auth/callback', async (req: Request, res: Response) => {
     <div class="container">
         ${successSvg}
         <h1 style="color: #4CAF50;">Tesla Connected!</h1>
-        <p>Your Tesla account has been successfully connected. You can now close this window and return to your AI assistant.</p>
-        <p>Your session ID (save this to reconnect):</p>
-        <div class="session-id">${sessionId}</div>
-        <p style="font-size: 12px; margin-top: 20px;">This window will close automatically in 5 seconds...</p>
+        <p>You're all set. Close this window and return to your AI assistant.</p>
+        <p><strong>Important:</strong> To stay logged in when your client reconnects, use this URL as your MCP server URL (keep it private):</p>
+        <div class="session-id">${connectionUrl}</div>
+        <p style="font-size: 12px; color: rgba(255,255,255,0.6); margin-top: 16px;">Treat this URL like a password. If you don't add it to your client, you may be asked to set up again after reconnects.</p>
+        <p style="font-size: 12px; margin-top: 20px;">You can close this window when you're done.</p>
     </div>
-    <script>
-        setTimeout(() => window.close(), 5000);
-    </script>
 </body>
 </html>
         `);
@@ -1099,28 +1182,23 @@ app.get('/', (req: Request, res: Response) => {
             <li>Create a Tesla Developer App at <a href="https://developer.tesla.com" target="_blank">developer.tesla.com</a></li>
             <li>Enter your Client ID and Client Secret</li>
             <li>Connect your Tesla account</li>
-            <li>Use your AI assistant to control your Tesla!</li>
+            <li>After auth, use the <strong>connection URL</strong> from the success page as your MCP server URL so you stay logged in. Keep it private.</li>
         </ol>
         
         <h2 style="margin-top: 30px;">Endpoints</h2>
         
         <div class="endpoint">
-            <code>GET /sse?session=YOUR_SESSION_ID</code>
-            <p>SSE endpoint for MCP client connection</p>
+            <code>GET /sse</code> or <code>GET /sse?token=XXX</code>
+            <p>SSE endpoint for MCP client. Use the connection URL (with ?token=) from the success page after auth so reconnects keep you logged in.</p>
         </div>
         
         <div class="endpoint">
-            <code>POST /messages?sessionId=YOUR_SESSION_ID</code>
-            <p>Message endpoint for MCP client requests</p>
-        </div>
-        
-        <div class="endpoint">
-            <code>GET /setup?session=YOUR_SESSION_ID</code>
+            <code>GET /setup</code>
             <p>Set up your Tesla Developer credentials</p>
         </div>
         
         <div class="endpoint">
-            <code>GET /auth/login?session=YOUR_SESSION_ID</code>
+            <code>GET /auth/login</code>
             <p>Start Tesla OAuth authentication flow</p>
         </div>
     </div>

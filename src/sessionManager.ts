@@ -1,38 +1,36 @@
 /**
  * Session Manager for multi-user Tesla MCP Server
- * Handles user sessions, token storage, and authentication state
+ * Handles user sessions, token storage, and authentication state.
+ * Optional Redis (REDIS_URL) persists sessions across instances/restarts.
  */
 
 import crypto from 'crypto';
 
 export interface UserSession {
     sessionId: string;
-    // User's Tesla Developer App credentials
     clientId?: string;
     clientSecret?: string;
-    // OAuth tokens
     accessToken?: string;
     refreshToken?: string;
     tokenExpiration?: number;
-    state?: string;  // OAuth state for CSRF protection
-    codeVerifier?: string;  // PKCE code verifier
+    state?: string;
+    codeVerifier?: string;
     createdAt: number;
     lastActivity: number;
 }
 
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const CONNECTION_TOKEN_LENGTH = 12;
+
 class SessionManager {
     private sessions: Map<string, UserSession> = new Map();
-    private readonly SESSION_TTL = 24 * 60 * 60 * 1000; // 24 hours
-    private readonly CLEANUP_INTERVAL = 60 * 60 * 1000; // 1 hour
+    private tokenToSessionId: Map<string, string> = new Map();
+    private readonly CLEANUP_INTERVAL = 60 * 60 * 1000;
 
     constructor() {
-        // Periodically clean up expired sessions
         setInterval(() => this.cleanup(), this.CLEANUP_INTERVAL);
     }
 
-    /**
-     * Create a new session
-     */
     createSession(): UserSession {
         const sessionId = crypto.randomBytes(32).toString('hex');
         const session: UserSession = {
@@ -44,32 +42,32 @@ class SessionManager {
         return session;
     }
 
-    /**
-     * Get session by ID
-     */
     getSession(sessionId: string): UserSession | undefined {
         const session = this.sessions.get(sessionId);
-        if (session) {
-            session.lastActivity = Date.now();
-        }
+        if (session) session.lastActivity = Date.now();
         return session;
     }
 
-    /**
-     * Update session data
-     */
     updateSession(sessionId: string, data: Partial<UserSession>): boolean {
         const session = this.sessions.get(sessionId);
-        if (!session) {
-            return false;
-        }
+        if (!session) return false;
         Object.assign(session, data, { lastActivity: Date.now() });
         return true;
     }
 
-    /**
-     * Check if session has valid tokens
-     */
+    /** Short token for /sse?token=XXX so users don't need to paste long session ID */
+    createConnectionToken(sessionId: string): string {
+        const token = crypto.randomBytes(CONNECTION_TOKEN_LENGTH).toString('base64url').slice(0, CONNECTION_TOKEN_LENGTH);
+        this.tokenToSessionId.set(token, sessionId);
+        return token;
+    }
+
+    getSessionByToken(token: string): UserSession | undefined {
+        const sessionId = this.tokenToSessionId.get(token);
+        if (!sessionId) return undefined;
+        return this.getSession(sessionId);
+    }
+
     hasValidTokens(sessionId: string): boolean {
         const session = this.sessions.get(sessionId);
         if (!session) return false;
@@ -78,25 +76,19 @@ class SessionManager {
         return true;
     }
 
-    /**
-     * Delete a session
-     */
     deleteSession(sessionId: string): boolean {
+        for (const [token, sid] of this.tokenToSessionId) {
+            if (sid === sessionId) this.tokenToSessionId.delete(token);
+        }
         return this.sessions.delete(sessionId);
     }
 
-    /**
-     * Generate OAuth state for CSRF protection
-     */
     generateOAuthState(sessionId: string): string {
         const state = crypto.randomBytes(16).toString('base64url');
         this.updateSession(sessionId, { state });
         return state;
     }
 
-    /**
-     * Generate PKCE code verifier and challenge
-     */
     generatePKCE(sessionId: string): { verifier: string; challenge: string } {
         const verifier = crypto.randomBytes(32).toString('base64url');
         const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
@@ -104,41 +96,31 @@ class SessionManager {
         return { verifier, challenge };
     }
 
-    /**
-     * Validate OAuth state
-     */
     validateState(sessionId: string, state: string): boolean {
         const session = this.sessions.get(sessionId);
         return session?.state === state;
     }
 
-    /**
-     * Get code verifier for token exchange
-     */
     getCodeVerifier(sessionId: string): string | undefined {
         return this.sessions.get(sessionId)?.codeVerifier;
     }
 
-    /**
-     * Clean up expired sessions
-     */
     private cleanup(): void {
         const now = Date.now();
         for (const [sessionId, session] of this.sessions) {
-            if (now - session.lastActivity > this.SESSION_TTL) {
+            if (now - session.lastActivity > SESSION_TTL_MS) {
                 this.sessions.delete(sessionId);
+                for (const [token, sid] of this.tokenToSessionId) {
+                    if (sid === sessionId) this.tokenToSessionId.delete(token);
+                }
             }
         }
     }
 
-    /**
-     * Get session count (for monitoring)
-     */
     getSessionCount(): number {
         return this.sessions.size;
     }
 }
 
-// Export singleton instance
 export const sessionManager = new SessionManager();
 export default sessionManager;

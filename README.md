@@ -35,9 +35,12 @@ Use the server without running anything locally. Each user connects with their o
 1. Use a tool (e.g. **get_setup_url**) — the agent will return a link.
 2. Open the link and enter your **Tesla Developer** Client ID and Client Secret.
 3. Log in with your Tesla account when redirected.
-4. After that, tools like **list_cars** and **get_vehicle_location** work for your vehicles.
+4. On the **success page**, copy the **connection URL** (e.g. `https://.../sse?token=...`). **Use that URL as your MCP server URL** in your client so reconnects keep you logged in. Keep it private.
+5. If you don’t add that URL, your client may get a new session on each reconnect and ask you to set up again.
 
 **Getting Tesla Developer credentials:** Create an app at [developer.tesla.com](https://developer.tesla.com). Set the redirect URI to `https://YOUR_SERVER_URL/auth/callback` (e.g. `https://tesla-mcp.onrender.com/auth/callback`).
+
+**Render:** Set **Instance count to 1** (Dashboard → your service → Settings) so all requests hit the same server and your session isn’t lost.
 
 ---
 
@@ -82,6 +85,8 @@ Configure your MCP client to run the server command (e.g. `node run-mcp.js`). Ge
 |----------|----------|-------------|
 | **HTTP mode** | | |
 | `BASE_URL` | Yes (production) | Public HTTPS URL of your server (e.g. `https://tesla-mcp.onrender.com`) |
+| `TESLA_CLIENT_ID` | Optional | If set with `TESLA_CLIENT_SECRET`, users go **straight to the Tesla login page** (no setup page) |
+| `TESLA_CLIENT_SECRET` | Optional | Server Tesla app secret; use with `TESLA_CLIENT_ID` |
 | `PORT` | No | Port (default `3000`) |
 | `HOST` | No | Bind address (default `0.0.0.0`) |
 | **Stdio mode** | | |
@@ -126,7 +131,37 @@ docker build -t tesla-mcp .
 docker run -p 3000:3000 -e BASE_URL=https://your-domain.com tesla-mcp
 ```
 
-**Production:** Use HTTPS and set `BASE_URL` to your public URL. See [SECURITY.md](SECURITY.md).
+**Production:** Use HTTPS and set `BASE_URL` to your public URL. On Render, set **Instance count to 1** so sessions persist. See [SECURITY.md](SECURITY.md).
+
+---
+
+## Troubleshooting
+
+**Session keeps resetting / setup keeps asking**
+
+1. **Confirm credentials were saved** — After submitting the setup form, you should see a green **"Credentials saved successfully"** message. If you see that, your Client ID and Secret were saved for that session.
+2. **If setup keeps appearing**, double-check in your [Tesla Developer App](https://developer.tesla.com):
+   - **Client ID** and **Client Secret** are correct (copy from the app page).
+   - **Redirect URI** is set **exactly** to your server’s callback URL, for example:
+     - Render: `https://tesla-mcp.onrender.com/auth/callback`
+     - Local: `http://localhost:3000/auth/callback`
+   Any typo or extra slash will cause Tesla to reject the auth and the session will not persist.
+
+**“Authenticating your account” spinner never stops**
+
+Tesla should redirect you back to this app; if the spinner never finishes, the redirect may be failing. Check that your Tesla app’s **Redirect URI** is exactly `https://tesla-mcp.onrender.com/auth/callback` (or your `BASE_URL` + `/auth/callback`). Try in a **normal browser window** with extensions disabled so nothing blocks the redirect.
+
+**Session “doesn’t save” in incognito / have to log in again**
+
+Sessions are stored on the **server**, not in the browser. Incognito doesn’t keep cookies, but we don’t use cookies for your session—we use the **connection URL** with the token. After you log in, you must **copy the connection URL** (e.g. `https://.../sse?token=...`) from the **success page** and use that URL as your MCP server URL. If you use the plain `/sse` URL without the token, each new connection gets a new session and you’ll be asked to set up or log in again.
+
+**Tesla login page shows errors or won’t load (CSP, “inline script”, fingerprint, etc.)**
+
+Those errors come from **Tesla’s** login site (`auth.tesla.com`), not from this server. Browsers or extensions (e.g. ad blockers, Cursor, or other injectors) can block scripts on Tesla’s page and break login.
+
+- **Try in a private/incognito window** with extensions disabled.
+- **Try another browser** or a clean profile without extensions.
+- **Temporarily allow** `auth.tesla.com` in your ad/tracking blocker so Tesla’s scripts (and reCAPTCHA) can load.
 
 ---
 
