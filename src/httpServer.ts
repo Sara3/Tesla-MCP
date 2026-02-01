@@ -49,8 +49,19 @@ const SCOPES = 'openid offline_access vehicle_device_data vehicle_cmds vehicle_c
 
 const app = express();
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Skip body parsing for POST /messages so the MCP transport can read the raw stream
+app.use((req, res, next) => {
+    if (req.path === '/messages' && req.method === 'POST') {
+        return next();
+    }
+    express.json()(req, res, next);
+});
+app.use((req, res, next) => {
+    if (req.path === '/messages' && req.method === 'POST') {
+        return next();
+    }
+    express.urlencoded({ extended: true })(req, res, next);
+});
 
 // Store active transports and their sessions
 const activeTransports: Map<string, { transport: SSEServerTransport; server: Server }> = new Map();
