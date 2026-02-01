@@ -150,107 +150,61 @@ function createMCPServer(sessionId: string): Server {
         };
     });
 
-    // Handler that lists available tools
+    // Handler that lists available tools - always show all tools so the UI shows full capability
     server.setRequestHandler(ListToolsRequestSchema, async () => {
-        const teslaService = createUserTeslaService(sessionId);
-        
-        // Check if user needs to set up credentials
-        if (!teslaService.hasCredentials()) {
-            return {
-                tools: [{
-                    name: "setup_credentials",
-                    description: "You need to set up your Tesla Developer App credentials first. Visit the setup URL to configure your CLIENT_ID and CLIENT_SECRET.",
-                    inputSchema: {
-                        type: "object",
-                        properties: {},
-                        required: []
-                    }
-                }]
-            };
-        }
-        
-        // Check if user needs to authenticate
-        if (!teslaService.isAuthenticated()) {
-            return {
-                tools: [{
-                    name: "authenticate",
-                    description: "You need to authenticate with your Tesla account. Visit the authentication URL to connect your Tesla.",
-                    inputSchema: {
-                        type: "object",
-                        properties: {},
-                        required: []
-                    }
-                }]
-            };
-        }
-
-        const vehicles = await getVehiclesForSession(sessionId);
-
-        if (vehicles.length === 0) {
-            return {
-                tools: [{
-                    name: "refresh_vehicles",
-                    description: "Refresh the list of Tesla vehicles",
-                    inputSchema: {
-                        type: "object",
-                        properties: {
-                            random_string: {
-                                type: "string",
-                                description: "Dummy parameter for no-parameter tools"
-                            }
-                        },
-                        required: ["random_string"]
-                    }
-                }]
-            };
-        }
-
-        return {
-            tools: [
-                {
-                    name: "wake_up",
-                    description: "Wake up your Tesla vehicle from sleep mode",
-                    inputSchema: {
-                        type: "object",
-                        properties: {
-                            vehicle_id: {
-                                type: "string",
-                                description: "Tag of the vehicle to wake up (can be id, vehicle_id, or vin)"
-                            }
-                        },
-                        required: ["vehicle_id"]
-                    }
-                },
-                {
-                    name: "refresh_vehicles",
-                    description: "Refresh the list of Tesla vehicles",
-                    inputSchema: {
-                        type: "object",
-                        properties: {
-                            random_string: {
-                                type: "string",
-                                description: "Dummy parameter for no-parameter tools"
-                            }
-                        },
-                        required: ["random_string"]
-                    }
-                },
-                {
-                    name: "debug_vehicles",
-                    description: "Show debug information about available vehicles",
-                    inputSchema: {
-                        type: "object",
-                        properties: {
-                            random_string: {
-                                type: "string",
-                                description: "Dummy parameter for no-parameter tools"
-                            }
-                        },
-                        required: ["random_string"]
-                    }
+        const tools = [
+            {
+                name: "get_setup_url",
+                description: "Get the URL to set up your Tesla Developer App credentials (Client ID and Secret). Open this link first if you haven't connected Tesla yet.",
+                inputSchema: {
+                    type: "object",
+                    properties: {},
+                    required: []
                 }
-            ]
-        };
+            },
+            {
+                name: "get_auth_url",
+                description: "Get the URL to connect your Tesla account (log in with your Tesla email and password). Use this after you've set up credentials.",
+                inputSchema: {
+                    type: "object",
+                    properties: {},
+                    required: []
+                }
+            },
+            {
+                name: "wake_up",
+                description: "Wake up your Tesla vehicle from sleep mode. Requires vehicle_id (id, vehicle_id, or vin).",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        vehicle_id: {
+                            type: "string",
+                            description: "Vehicle to wake up (id, vehicle_id, or vin)"
+                        }
+                    },
+                    required: ["vehicle_id"]
+                }
+            },
+            {
+                name: "refresh_vehicles",
+                description: "Refresh the list of Tesla vehicles from the API.",
+                inputSchema: {
+                    type: "object",
+                    properties: {},
+                    required: []
+                }
+            },
+            {
+                name: "debug_vehicles",
+                description: "Show debug information about your Tesla vehicles (ids, vins, state).",
+                inputSchema: {
+                    type: "object",
+                    properties: {},
+                    required: []
+                }
+            }
+        ];
+        return { tools };
     });
 
     // Handler for the vehicle control tools
@@ -258,28 +212,28 @@ function createMCPServer(sessionId: string): Server {
         const teslaService = createUserTeslaService(sessionId);
 
         switch (request.params.name) {
-            case "setup_credentials": {
+            case "get_setup_url": {
                 return {
                     content: [{
                         type: "text",
-                        text: `Please set up your Tesla Developer App credentials by visiting: ${BASE_URL}/setup?session=${sessionId}\n\nYou'll need to create an app at https://developer.tesla.com and get your Client ID and Client Secret.`
+                        text: `Set up your Tesla Developer App credentials:\n\n**Open this link:** ${BASE_URL}/setup?session=${sessionId}\n\n1. Create an app at https://developer.tesla.com\n2. Set redirect URI to: ${BASE_URL}/auth/callback\n3. Enter your Client ID and Client Secret on the setup page`
                     }]
                 };
             }
 
-            case "authenticate": {
+            case "get_auth_url": {
                 if (!teslaService.hasCredentials()) {
                     return {
                         content: [{
                             type: "text",
-                            text: `Please set up your credentials first: ${BASE_URL}/setup?session=${sessionId}`
+                            text: `Set up credentials first: ${BASE_URL}/setup?session=${sessionId}`
                         }]
                     };
                 }
                 return {
                     content: [{
                         type: "text",
-                        text: `Please authenticate with Tesla by visiting: ${BASE_URL}/auth/login?session=${sessionId}`
+                        text: `Connect your Tesla account:\n\n**Open this link:** ${BASE_URL}/auth/login?session=${sessionId}`
                     }]
                 };
             }
