@@ -646,30 +646,33 @@ const successSvg = `
 // ============================================
 
 // SSE endpoint - client connects here to receive messages
+// The MCP SDK sends its own sessionId to the client in the "endpoint" event,
+// so we must store the transport under that ID for POST /messages to find it.
 app.get('/sse', async (req: Request, res: Response) => {
-    // Get or create session
-    let sessionId = req.query.session as string;
+    // Get or create user session (for Tesla auth / credentials)
+    let userSessionId = req.query.session as string;
     
-    if (!sessionId || !sessionManager.getSession(sessionId)) {
+    if (!userSessionId || !sessionManager.getSession(userSessionId)) {
         const session = sessionManager.createSession();
-        sessionId = session.sessionId;
+        userSessionId = session.sessionId;
     }
 
-    console.log(`SSE connection established for session: ${sessionId}`);
-
-    // Create SSE transport
+    // Create SSE transport first - it generates the sessionId the client will use for POSTs
     const transport = new SSEServerTransport('/messages', res);
+    const transportSessionId = transport.sessionId;
+
+    console.log(`SSE connection: userSession=${userSessionId}, transportSession=${transportSessionId}`);
+
+    // Create MCP server with user's session (Tesla credentials live there)
+    const server = createMCPServer(userSessionId);
     
-    // Create MCP server for this session
-    const server = createMCPServer(sessionId);
-    
-    // Store transport and server
-    activeTransports.set(sessionId, { transport, server });
+    // Store under transport's sessionId so client POSTs to /messages?sessionId=X find us
+    activeTransports.set(transportSessionId, { transport, server });
 
     // Clean up on disconnect
     res.on('close', () => {
-        console.log(`SSE connection closed for session: ${sessionId}`);
-        activeTransports.delete(sessionId);
+        console.log(`SSE connection closed for transport ${transportSessionId}`);
+        activeTransports.delete(transportSessionId);
     });
 
     // Connect server to transport

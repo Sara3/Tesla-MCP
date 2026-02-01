@@ -267,12 +267,22 @@ Each user needs to:
 
 ### Connecting MCP Clients
 
-For clients that support HTTP/SSE transport, configure them with:
+**Tool box / custom tool (e.g. v.app, agent UIs):**
+
+1. **Server URL:** Use `https://tesla-mcp.onrender.com/sse` (no session ID needed).
+2. **Enable the tool** – the connection will be established.
+3. **First time:** When you use a Tesla action, the agent will return a link. Open that link to:
+   - Enter your Tesla Developer App credentials (Client ID & Secret from [developer.tesla.com](https://developer.tesla.com)),
+   - Then log in with your Tesla account.
+4. Each user logs in to their own Tesla account; credentials are stored per session.
+
+**Optional (persistent session):** You can use a session in the URL so the same session is reused:
 
 ```
 SSE URL: https://your-domain.com/sse?session=YOUR_SESSION_ID
-Messages URL: https://your-domain.com/messages?sessionId=YOUR_SESSION_ID
 ```
+
+Get a session by visiting `https://your-domain.com/setup` or `https://your-domain.com/auth/session`.
 
 ### Deploy to Render (Recommended)
 
