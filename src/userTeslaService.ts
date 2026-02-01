@@ -137,7 +137,6 @@ export class UserTeslaService {
 
             return response.data.response || [];
         } catch (error: any) {
-            console.error('Error fetching vehicles:', error.response?.data || error.message);
             throw new Error('Failed to fetch vehicles');
         }
     }
@@ -158,7 +157,6 @@ export class UserTeslaService {
 
             return response.data.response;
         } catch (error: any) {
-            console.error('Error waking up vehicle:', error.response?.data || error.message);
             throw new Error(`Failed to wake up vehicle: ${error.message}`);
         }
     }
@@ -229,7 +227,6 @@ export class UserTeslaService {
 
             return result;
         } catch (error: any) {
-            console.error('Error fetching vehicle data:', error.response?.data || error.message);
             throw new Error(`Failed to get vehicle data: ${error.message}`);
         }
     }

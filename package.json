@@ -1,9 +1,22 @@
 {
   "name": "tesla-mcp",
   "version": "0.1.0",
-  "description": "A MCP Server for your Tesla",
-  "private": true,
+  "description": "MCP server for Tesla Fleet API — list cars, get location, wake up, and more",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sara3/Tesla-MCP.git"
+  },
+  "homepage": "https://github.com/Sara3/Tesla-MCP#readme",
+  "keywords": [
+    "tesla",
+    "mcp",
+    "model-context-protocol",
+    "fleet-api",
+    "vehicle",
+    "location"
+  ],
+  "license": "MIT",
   "bin": {
     "tesla-mcp-server": "./build/index.js",
     "tesla-mcp-http": "./build/httpServer.js"

@@ -53,15 +53,6 @@ const codeChallenge = generateCodeChallenge(codeVerifier);
 // Authorization URL
 const authUrl = `${AUTH_URL}/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=${encodeURIComponent(SCOPES)}&state=${state}&code_challenge=${codeChallenge}&code_challenge_method=S256`;
 
-// Debug output
-console.log('\n==== DEBUG INFO ====');
-console.log('Client ID:', clientId);
-console.log('Redirect URI:', REDIRECT_URI);
-console.log('Code Verifier:', codeVerifier);
-console.log('Code Challenge:', codeChallenge);
-console.log('Full Auth URL:', authUrl);
-console.log('====================\n');
-
 // Open the browser for the user to authenticate
 console.log('Opening browser for Tesla authentication...');
 console.log('Please log in with your Tesla account when the browser opens.');
@@ -138,10 +129,9 @@ const server = http.createServer(async (req, res) => {
                 const { access_token, refresh_token, expires_in } = tokenResponse.data;
 
                 console.log('\nAuthentication successful!\n');
-                console.log('Access Token:', access_token.substring(0, 20) + '...');
-                console.log('Refresh Token:', refresh_token);
+                console.log('Access token obtained.');
                 console.log('Token expires in:', expires_in, 'seconds');
-                console.log('\nThis refresh token does not expire unless revoked.');
+                console.log('Refresh token does not expire unless revoked.');
 
                 // Update the .env file with the refresh token
                 try {

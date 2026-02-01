@@ -36,8 +36,6 @@ if (!envLoaded) {
     console.error('Warning: No .env file found. Environment variables must be set manually.');
 }
 
-// Print environment variable status for debugging (to stderr so it doesn't interfere with MCP)
-console.error(`Environment check: TESLA_CLIENT_ID=${process.env.TESLA_CLIENT_ID ? 'set' : 'not set'}, TESLA_CLIENT_SECRET=${process.env.TESLA_CLIENT_SECRET ? 'set' : 'not set'}, TESLA_REFRESH_TOKEN=${process.env.TESLA_REFRESH_TOKEN ? 'set' : 'not set'}`);
 
 // Paths to keys
 const KEYS_DIR = path.join(__dirname, '../keys');
@@ -139,20 +137,14 @@ export class TeslaService {
      * Get access token, refreshing if necessary
      */
     private async getAccessToken(): Promise<string> {
-        console.error(`[DEBUG] Getting access token. Current status: ${this.accessToken ? 'token exists' : 'no token'}, expired: ${Date.now() >= this.tokenExpiration}`);
-
-        // If token is not set or is expired, refresh it
         if (!this.accessToken || Date.now() >= this.tokenExpiration) {
-            console.error(`[DEBUG] Token needs refresh, calling authorize()`);
             await this.authorize();
         }
 
         if (!this.accessToken) {
-            console.error(`[DEBUG] Critical error: Still no access token after authorize()`);
             throw new Error('Could not obtain access token');
         }
 
-        console.error(`[DEBUG] Returning access token (first 5 chars: ${this.accessToken.substring(0, 5)}...)`);
         return this.accessToken;
     }
 
@@ -186,45 +178,22 @@ export class TeslaService {
      * This is often needed before sending commands to a vehicle that is asleep
      */
     async wakeUp(vehicleId: string): Promise<Vehicle> {
-        console.error(`[DEBUG] Starting wakeUp for vehicle ${vehicleId}`);
         const token = await this.getAccessToken();
-        console.error(`[DEBUG] Got access token for wakeUp (length: ${token.length})`);
 
         try {
             if (!this.isRegistered) {
-                console.error(`[DEBUG] Error: Application is not registered with Tesla API`);
                 throw new Error('Application is not registered with Tesla API. Run "pnpm register" to complete the registration process');
             }
 
-            const wakeUpUrl = `${BASE_URL}/api/1/vehicles/${vehicleId}/wake_up`;
-            console.error(`[DEBUG] Sending wake_up request to URL: ${wakeUpUrl}`);
+            const response = await axios.post(`${BASE_URL}/api/1/vehicles/${vehicleId}/wake_up`, {}, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
 
-            try {
-                const response = await axios.post(wakeUpUrl, {}, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json',
-                    },
-                });
-
-                console.error(`[DEBUG] Wake up response status: ${response.status}`);
-                if (response.data && response.data.response) {
-                    console.error(`[DEBUG] Vehicle state after wake_up: ${response.data.response.state}`);
-                } else {
-                    console.error(`[DEBUG] Unexpected response format: ${JSON.stringify(response.data)}`);
-                }
-
-                return response.data.response;
-            } catch (axiosError: any) {
-                console.error(`[DEBUG] Axios error in wake_up request: ${axiosError.message}`);
-                if (axiosError.response) {
-                    console.error(`[DEBUG] Response status: ${axiosError.response.status}`);
-                    console.error(`[DEBUG] Response data: ${JSON.stringify(axiosError.response.data, null, 2)}`);
-                }
-                throw axiosError;
-            }
+            return response.data.response;
         } catch (error: any) {
-            console.error(`[DEBUG] Error in wakeUp: ${error.message}`);
             throw new Error(`Failed to wake up vehicle: ${error.message}`);
         }
     }

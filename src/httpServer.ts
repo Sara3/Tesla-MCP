@@ -91,8 +91,7 @@ async function getVehiclesForSession(sessionId: string, forceRefresh = false): P
         const vehicles = await teslaService.getVehicles();
         vehiclesCache.set(sessionId, { vehicles, lastFetch: now });
         return vehicles;
-    } catch (error) {
-        console.error('Error fetching vehicles:', error);
+    } catch {
         return cache?.vehicles || [];
     }
 }
@@ -216,6 +215,15 @@ function createMCPServer(sessionId: string): Server {
                     },
                     required: ["vehicle_id"]
                 }
+            },
+            {
+                name: "list_cars",
+                description: "List your Tesla vehicles and get their IDs. Use these IDs with wake_up, get_vehicle_location, etc.",
+                inputSchema: {
+                    type: "object",
+                    properties: {},
+                    required: []
+                }
             }
         ];
         return { tools };
@@ -249,6 +257,43 @@ function createMCPServer(sessionId: string): Server {
                         type: "text",
                         text: `Connect your Tesla account:\n\n**Open this link:** ${BASE_URL}/auth/login?session=${sessionId}`
                     }]
+                };
+            }
+
+            case "list_cars": {
+                if (!teslaService.hasCredentials()) {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: `Please set up your credentials first: ${BASE_URL}/setup?session=${sessionId}`
+                        }]
+                    };
+                }
+                if (!teslaService.isAuthenticated()) {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: `Not authenticated. Please visit: ${BASE_URL}/auth/login?session=${sessionId}`
+                        }]
+                    };
+                }
+
+                const listVehicles = await getVehiclesForSession(sessionId);
+                if (listVehicles.length === 0) {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: "No vehicles found. Try refresh_vehicles first."
+                        }]
+                    };
+                }
+
+                const lines = listVehicles.map((v, i) => {
+                    return `${i + 1}. **${v.display_name || "Tesla"}**\n   id: \`${v.id}\`\n   vehicle_id: \`${v.vehicle_id}\`\n   vin: \`${v.vin}\`\n   state: ${v.state ?? "—"}`;
+                });
+                const text = `Your Tesla vehicles (use **id** or **vehicle_id** or **vin** with other tools):\n\n${lines.join("\n\n")}`;
+                return {
+                    content: [{ type: "text", text }]
                 };
             }
 
@@ -697,7 +742,7 @@ app.get('/sse', async (req: Request, res: Response) => {
     const transport = new SSEServerTransport('/messages', res);
     const transportSessionId = transport.sessionId;
 
-    console.log(`SSE connection: userSession=${userSessionId}, transportSession=${transportSessionId}`);
+        // Do not log session IDs (security)
 
     // Create MCP server with user's session (Tesla credentials live there)
     const server = createMCPServer(userSessionId);
@@ -707,7 +752,7 @@ app.get('/sse', async (req: Request, res: Response) => {
 
     // Clean up on disconnect
     res.on('close', () => {
-        console.log(`SSE connection closed for transport ${transportSessionId}`);
+        // SSE connection closed
         activeTransports.delete(transportSessionId);
     });
 
@@ -980,7 +1025,7 @@ app.get('/auth/callback', async (req: Request, res: Response) => {
         `);
 
     } catch (error: any) {
-        console.error('Token exchange error:', error.response?.data || error.message);
+        // Do not log token/API response details (security)
         res.status(500).send(`
 <!DOCTYPE html>
 <html lang="en">
