@@ -143,6 +143,10 @@ The server provides the following tools that Claude can use:
   - No parameters required
   - Returns ID, vehicle_id, VIN, and state information
 
+- **`get_vehicle_location`**: Get your Tesla's current location (latitude, longitude)
+  - Takes `vehicle_id` (id, vehicle_id, or vin)
+  - Returns coordinates and a Google Maps link (like a parking monitor)
+
 ## Setting Up Claude to Use the MCP Server
 
 1. Create the Claude configuration directory:

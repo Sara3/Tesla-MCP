@@ -202,6 +202,20 @@ function createMCPServer(sessionId: string): Server {
                     properties: {},
                     required: []
                 }
+            },
+            {
+                name: "get_vehicle_location",
+                description: "Get your Tesla's current location (latitude, longitude). Like a parking monitor - where is my car right now. May wake the vehicle briefly.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        vehicle_id: {
+                            type: "string",
+                            description: "Vehicle to get location for (id, vehicle_id, or vin)"
+                        }
+                    },
+                    required: ["vehicle_id"]
+                }
             }
         ];
         return { tools };
@@ -236,6 +250,63 @@ function createMCPServer(sessionId: string): Server {
                         text: `Connect your Tesla account:\n\n**Open this link:** ${BASE_URL}/auth/login?session=${sessionId}`
                     }]
                 };
+            }
+
+            case "get_vehicle_location": {
+                if (!teslaService.hasCredentials()) {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: `Please set up your credentials first: ${BASE_URL}/setup?session=${sessionId}`
+                        }]
+                    };
+                }
+                if (!teslaService.isAuthenticated()) {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: `Not authenticated. Please visit: ${BASE_URL}/auth/login?session=${sessionId}`
+                        }]
+                    };
+                }
+
+                const locationVehicleId = String(request.params.arguments?.vehicle_id);
+                if (!locationVehicleId) {
+                    throw new Error("vehicle_id is required");
+                }
+
+                const locationVehicles = await getVehiclesForSession(sessionId);
+                const locationVehicle = locationVehicles.find(v =>
+                    String(v.id) === locationVehicleId ||
+                    String(v.vehicle_id) === locationVehicleId ||
+                    String(v.vin) === locationVehicleId
+                );
+                if (!locationVehicle) {
+                    throw new Error(`Vehicle ${locationVehicleId} not found`);
+                }
+
+                try {
+                    const data = await teslaService.getVehicleData(locationVehicleId);
+                    const lat = data.latitude ?? data.native_latitude;
+                    const lon = data.longitude ?? data.native_longitude;
+                    const name = locationVehicle.display_name || "Tesla";
+
+                    if (lat != null && lon != null) {
+                        const mapsUrl = `https://www.google.com/maps?q=${lat},${lon}`;
+                        const text = `${name} location:\n• Latitude: ${lat}\n• Longitude: ${lon}\n• Map: ${mapsUrl}\n• Heading: ${data.heading ?? "—"}\n• Speed: ${data.speed ?? "—"}\n• Shift: ${data.shift_state ?? "—"}`;
+                        return {
+                            content: [{ type: "text", text }]
+                        };
+                    }
+                    return {
+                        content: [{
+                            type: "text",
+                            text: `Location not available for ${name} (vehicle may be asleep or location not shared). Try wake_up first, or check Tesla app location settings. Raw: ${JSON.stringify(data, null, 2)}`
+                        }]
+                    };
+                } catch (error: any) {
+                    throw new Error(`Failed to get location: ${error.message}`);
+                }
             }
 
             case "wake_up": {

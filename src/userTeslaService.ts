@@ -162,6 +162,77 @@ export class UserTeslaService {
             throw new Error(`Failed to wake up vehicle: ${error.message}`);
         }
     }
+
+    /**
+     * Get vehicle data (live call to vehicle - may wake it).
+     * Includes location (latitude, longitude) when available from drive_state or location_data.
+     */
+    async getVehicleData(vehicleId: string): Promise<{
+        latitude?: number;
+        longitude?: number;
+        heading?: number;
+        gps_as_of?: number;
+        speed?: number | null;
+        shift_state?: string | null;
+        native_latitude?: number;
+        native_longitude?: number;
+        native_location_supported?: boolean;
+        [key: string]: unknown;
+    }> {
+        const token = await this.getAccessToken();
+
+        try {
+            const response = await axios.get(`${BASE_URL}/api/1/vehicles/${vehicleId}/vehicle_data`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            const data = response.data?.response;
+            if (!data) {
+                throw new Error('No vehicle data in response');
+            }
+
+            // Fleet API may return drive_state with lat/long, or location_data
+            const driveState = data.drive_state;
+            const locationData = data.location_data;
+
+            const result: {
+                latitude?: number;
+                longitude?: number;
+                heading?: number;
+                gps_as_of?: number;
+                speed?: number | null;
+                shift_state?: string | null;
+                native_latitude?: number;
+                native_longitude?: number;
+                native_location_supported?: boolean;
+                [key: string]: unknown;
+            } = { ...data };
+
+            if (driveState) {
+                result.latitude = driveState.latitude;
+                result.longitude = driveState.longitude;
+                result.heading = driveState.heading;
+                result.gps_as_of = driveState.gps_as_of;
+                result.speed = driveState.speed;
+                result.shift_state = driveState.shift_state;
+                result.native_latitude = driveState.native_latitude;
+                result.native_longitude = driveState.native_longitude;
+                result.native_location_supported = driveState.native_location_supported;
+            }
+            if (locationData) {
+                result.latitude = result.latitude ?? locationData.latitude;
+                result.longitude = result.longitude ?? locationData.longitude;
+            }
+
+            return result;
+        } catch (error: any) {
+            console.error('Error fetching vehicle data:', error.response?.data || error.message);
+            throw new Error(`Failed to get vehicle data: ${error.message}`);
+        }
+    }
 }
 
 // Factory function to create a UserTeslaService for a session
