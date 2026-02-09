@@ -9,6 +9,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for th
 - **wake_up** — Wake a vehicle from sleep
 - **refresh_vehicles** / **debug_vehicles** — Refresh list and debug info
 - **HTTP/SSE mode** — Host as a web service; each user brings their own Tesla Developer credentials (no server-side secrets required)
+- **Receive and respond to texts (optional)** — With Twilio configured, receive inbound SMS via webhook and use **get_recent_texts** / **send_text** so the agent can read and reply to messages
 
 ## Security
 
@@ -93,6 +94,12 @@ Configure your MCP client to run the server command (e.g. `node run-mcp.js`). Ge
 | `TESLA_CLIENT_ID` | Yes | From [developer.tesla.com](https://developer.tesla.com) |
 | `TESLA_CLIENT_SECRET` | Yes | From developer portal |
 | `TESLA_REFRESH_TOKEN` | Yes | From `npm run get-token` |
+| **SMS (Twilio, HTTP mode only)** | | |
+| `TWILIO_ACCOUNT_SID` | Optional | Twilio account SID (enables get_recent_texts / send_text) |
+| `TWILIO_AUTH_TOKEN` | Optional | Twilio auth token |
+| `TWILIO_PHONE_NUMBER` | Optional | Your Twilio phone number (E.164, e.g. +15551234567) |
+
+**SMS setup:** In the Twilio console, set your phone number’s “A message comes in” webhook to `https://YOUR_BASE_URL/webhooks/twilio/sms` (e.g. `https://tesla-mcp.onrender.com/webhooks/twilio/sms`). Inbound messages are stored in memory and returned by **get_recent_texts**; use **send_text** to reply.
 
 **Never commit** `.env` or `keys/`. Run `./check-secrets.sh` before pushing.
 
@@ -109,8 +116,10 @@ Configure your MCP client to run the server command (e.g. `node run-mcp.js`). Ge
 | **wake_up** | Wake a vehicle; takes `vehicle_id` |
 | **refresh_vehicles** | Refresh the vehicle list from the API |
 | **debug_vehicles** | Debug info (ids, vins, state) |
+| **get_recent_texts** | List recent inbound SMS (optional; requires Twilio env vars) |
+| **send_text** | Send an SMS to a number (optional; requires Twilio; args: `to`, `body`) |
 
-For **vehicle_id** you can use `id`, `vehicle_id`, or `vin` from **list_cars**.
+For **vehicle_id** you can use `id`, `vehicle_id`, or `vin` from **list_cars**. For **send_text**, use E.164 phone numbers (e.g. `+15551234567`).
 
 ---
 

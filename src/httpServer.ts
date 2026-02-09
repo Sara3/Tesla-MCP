@@ -75,6 +75,21 @@ const activeTransports: Map<string, { transport: SSEServerTransport; server: Ser
 const vehiclesCache: Map<string, { vehicles: Vehicle[]; lastFetch: number }> = new Map();
 const CACHE_TTL = 60000; // 1 minute
 
+// Optional SMS (Twilio): inbound messages stored here for get_recent_texts
+export interface InboundSms {
+    from: string;
+    to: string;
+    body: string;
+    receivedAt: number;
+}
+const SMS_INBOX_MAX = 100;
+const smsInbox: InboundSms[] = [];
+
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
+const HAS_TWILIO = !!(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_PHONE_NUMBER);
+
 /**
  * Get vehicles for a session with caching
  */
@@ -229,7 +244,41 @@ function createMCPServer(sessionId: string): Server {
                     properties: {},
                     required: []
                 }
-            }
+            },
+            ...(HAS_TWILIO ? [
+                {
+                    name: "get_recent_texts",
+                    description: "Get recent inbound SMS messages received by your Twilio number. Use this to see new texts so you can respond.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            limit: {
+                                type: "number",
+                                description: "Max number of messages to return (default 10)"
+                            }
+                        },
+                        required: []
+                    }
+                },
+                {
+                    name: "send_text",
+                    description: "Send an SMS (text message) to a phone number. Use E.164 format (e.g. +15551234567).",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            to: {
+                                type: "string",
+                                description: "Phone number in E.164 format (e.g. +15551234567)"
+                            },
+                            body: {
+                                type: "string",
+                                description: "Message text to send"
+                            }
+                        },
+                        required: ["to", "body"]
+                    }
+                }
+            ] : [])
         ];
         return { tools };
     });
@@ -238,14 +287,25 @@ function createMCPServer(sessionId: string): Server {
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const teslaService = createUserTeslaService(sessionId);
 
+        // Auto-inject server credentials into session so users don't need to set up their own Tesla Developer App
+        if (HAS_SERVER_CREDENTIALS && !teslaService.hasCredentials()) {
+            sessionManager.updateSession(sessionId, {
+                clientId: SERVER_CLIENT_ID,
+                clientSecret: SERVER_CLIENT_SECRET,
+            });
+        }
+
+        // Helper: generate the right auth URL for the current session
+        const getAuthUrl = () => `${BASE_URL}/auth/login?session=${sessionId}`;
+
         switch (request.params.name) {
             case "get_setup_url": {
-                const loginUrl = `${BASE_URL}/auth/login?session=${sessionId}`;
-                if (HAS_SERVER_CREDENTIALS) {
+                const loginUrl = getAuthUrl();
+                if (HAS_SERVER_CREDENTIALS || teslaService.hasCredentials()) {
                     return {
                         content: [{
                             type: "text",
-                            text: `Log in with your Tesla account:\n\n**Open this link:** ${loginUrl}\n\nAfter you connect, use the connection URL from the success page as your MCP server URL so you stay logged in. Keep it private.`
+                            text: `Connect your Tesla account:\n\n**Open this link:** ${loginUrl}\n\nLog in with your Tesla email and password. After you connect, your Tesla tools will work.`
                         }]
                     };
                 }
@@ -258,12 +318,12 @@ function createMCPServer(sessionId: string): Server {
             }
 
             case "get_auth_url": {
-                const loginUrl = `${BASE_URL}/auth/login?session=${sessionId}`;
+                const loginUrl = getAuthUrl();
                 if (HAS_SERVER_CREDENTIALS || teslaService.hasCredentials()) {
                     return {
                         content: [{
                             type: "text",
-                            text: `Log in with your Tesla account:\n\n**Open this link:** ${loginUrl}`
+                            text: `Connect your Tesla account:\n\n**Open this link:** ${loginUrl}\n\nLog in with your Tesla email and password.`
                         }]
                     };
                 }
@@ -276,13 +336,11 @@ function createMCPServer(sessionId: string): Server {
             }
 
             case "list_vehicles": {
-                const loginUrl = `${BASE_URL}/auth/login?session=${sessionId}`;
-                const setupUrl = `${BASE_URL}/setup?session=${sessionId}`;
                 if (!HAS_SERVER_CREDENTIALS && !teslaService.hasCredentials()) {
                     return {
                         content: [{
                             type: "text",
-                            text: `Set up credentials first: ${setupUrl}`
+                            text: `Set up credentials first: ${BASE_URL}/setup?session=${sessionId}`
                         }]
                     };
                 }
@@ -290,7 +348,7 @@ function createMCPServer(sessionId: string): Server {
                     return {
                         content: [{
                             type: "text",
-                            text: `Log in with your Tesla account:\n\n**Open this link:** ${loginUrl}`
+                            text: `Connect your Tesla account first:\n\n**Open this link:** ${getAuthUrl()}\n\nLog in with your Tesla email and password, then try again.`
                         }]
                     };
                 }
@@ -315,13 +373,11 @@ function createMCPServer(sessionId: string): Server {
             }
 
             case "get_vehicle_location": {
-                const loginUrl = `${BASE_URL}/auth/login?session=${sessionId}`;
-                const setupUrl = `${BASE_URL}/setup?session=${sessionId}`;
                 if (!HAS_SERVER_CREDENTIALS && !teslaService.hasCredentials()) {
                     return {
                         content: [{
                             type: "text",
-                            text: `Set up credentials first: ${setupUrl}`
+                            text: `Set up credentials first: ${BASE_URL}/setup?session=${sessionId}`
                         }]
                     };
                 }
@@ -329,7 +385,7 @@ function createMCPServer(sessionId: string): Server {
                     return {
                         content: [{
                             type: "text",
-                            text: `Log in with your Tesla account:\n\n**Open this link:** ${loginUrl}`
+                            text: `Connect your Tesla account first:\n\n**Open this link:** ${getAuthUrl()}\n\nLog in with your Tesla email and password, then try again.`
                         }]
                     };
                 }
@@ -374,13 +430,11 @@ function createMCPServer(sessionId: string): Server {
             }
 
             case "wake_up": {
-                const wakeLoginUrl = `${BASE_URL}/auth/login?session=${sessionId}`;
-                const wakeSetupUrl = `${BASE_URL}/setup?session=${sessionId}`;
                 if (!HAS_SERVER_CREDENTIALS && !teslaService.hasCredentials()) {
                     return {
                         content: [{
                             type: "text",
-                            text: `Set up credentials first: ${wakeSetupUrl}`
+                            text: `Set up credentials first: ${BASE_URL}/setup?session=${sessionId}`
                         }]
                     };
                 }
@@ -388,7 +442,7 @@ function createMCPServer(sessionId: string): Server {
                     return {
                         content: [{
                             type: "text",
-                            text: `Log in with your Tesla account:\n\n**Open this link:** ${wakeLoginUrl}`
+                            text: `Connect your Tesla account first:\n\n**Open this link:** ${getAuthUrl()}\n\nLog in with your Tesla email and password, then try again.`
                         }]
                     };
                 }
@@ -425,13 +479,11 @@ function createMCPServer(sessionId: string): Server {
             }
 
             case "refresh_vehicles": {
-                const refLoginUrl = `${BASE_URL}/auth/login?session=${sessionId}`;
-                const refSetupUrl = `${BASE_URL}/setup?session=${sessionId}`;
                 if (!HAS_SERVER_CREDENTIALS && !teslaService.hasCredentials()) {
                     return {
                         content: [{
                             type: "text",
-                            text: `Set up credentials first: ${refSetupUrl}`
+                            text: `Set up credentials first: ${BASE_URL}/setup?session=${sessionId}`
                         }]
                     };
                 }
@@ -439,7 +491,7 @@ function createMCPServer(sessionId: string): Server {
                     return {
                         content: [{
                             type: "text",
-                            text: `Log in with your Tesla account:\n\n**Open this link:** ${refLoginUrl}`
+                            text: `Connect your Tesla account first:\n\n**Open this link:** ${getAuthUrl()}\n\nLog in with your Tesla email and password, then try again.`
                         }]
                     };
                 }
@@ -454,13 +506,11 @@ function createMCPServer(sessionId: string): Server {
             }
 
             case "debug_vehicles": {
-                const dbgLoginUrl = `${BASE_URL}/auth/login?session=${sessionId}`;
-                const dbgSetupUrl = `${BASE_URL}/setup?session=${sessionId}`;
                 if (!HAS_SERVER_CREDENTIALS && !teslaService.hasCredentials()) {
                     return {
                         content: [{
                             type: "text",
-                            text: `Set up credentials first: ${dbgSetupUrl}`
+                            text: `Set up credentials first: ${BASE_URL}/setup?session=${sessionId}`
                         }]
                     };
                 }
@@ -468,7 +518,7 @@ function createMCPServer(sessionId: string): Server {
                     return {
                         content: [{
                             type: "text",
-                            text: `Log in with your Tesla account:\n\n**Open this link:** ${dbgLoginUrl}`
+                            text: `Connect your Tesla account first:\n\n**Open this link:** ${getAuthUrl()}\n\nLog in with your Tesla email and password, then try again.`
                         }]
                     };
                 }
@@ -500,6 +550,62 @@ function createMCPServer(sessionId: string): Server {
                 };
             }
 
+            case "get_recent_texts": {
+                if (!HAS_TWILIO) {
+                    throw new Error("SMS is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER.");
+                }
+                const limit = Math.min(Number(request.params.arguments?.limit) || 10, 50);
+                const recent = smsInbox.slice(0, limit);
+                if (recent.length === 0) {
+                    return {
+                        content: [{ type: "text", text: "No texts received yet. Inbound SMS will appear here once Twilio forwards them to the webhook." }]
+                    };
+                }
+                const lines = recent.map((m, i) =>
+                    `${i + 1}. From ${m.from} at ${new Date(m.receivedAt).toISOString()}:\n   ${m.body}`
+                );
+                return {
+                    content: [{ type: "text", text: `Recent texts (${recent.length}):\n\n${lines.join("\n\n")}` }]
+                };
+            }
+
+            case "send_text": {
+                if (!HAS_TWILIO) {
+                    throw new Error("SMS is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER.");
+                }
+                const to = String(request.params.arguments?.to ?? "").trim();
+                const body = String(request.params.arguments?.body ?? "").trim();
+                if (!to || !body) {
+                    throw new Error("send_text requires 'to' and 'body' (phone in E.164 format and message text).");
+                }
+                try {
+                    const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString("base64");
+                    const resp = await axios.post(
+                        `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`,
+                        new URLSearchParams({
+                            To: to,
+                            From: TWILIO_PHONE_NUMBER!,
+                            Body: body,
+                        }).toString(),
+                        {
+                            headers: {
+                                "Content-Type": "application/x-www-form-urlencoded",
+                                Authorization: `Basic ${auth}`,
+                            },
+                        }
+                    );
+                    const sid = resp.data?.sid;
+                    return {
+                        content: [{ type: "text", text: `Message sent to ${to}${sid ? ` (SID: ${sid})` : ""}.` }]
+                    };
+                } catch (err: unknown) {
+                    const msg = axios.isAxiosError(err) && err.response?.data?.message
+                        ? err.response.data.message
+                        : err instanceof Error ? err.message : String(err);
+                    throw new Error(`Failed to send SMS: ${msg}`);
+                }
+            }
+
             default:
                 throw new Error("Unknown tool");
         }
@@ -524,6 +630,14 @@ function createMCPServer(sessionId: string): Server {
         }
 
         const teslaService = createUserTeslaService(sessionId);
+
+        // Auto-inject server credentials for prompt handler too
+        if (HAS_SERVER_CREDENTIALS && !teslaService.hasCredentials()) {
+            sessionManager.updateSession(sessionId, {
+                clientId: SERVER_CLIENT_ID,
+                clientSecret: SERVER_CLIENT_SECRET,
+            });
+        }
 
         const loginUrl = `${BASE_URL}/auth/login?session=${sessionId}`;
         const setupUrl = `${BASE_URL}/setup?session=${sessionId}`;
@@ -747,6 +861,27 @@ const successSvg = `
         <path d="M30 50L45 65L70 35" stroke="#4CAF50" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
 `;
+
+// ============================================
+// Twilio SMS webhook (inbound texts)
+// ============================================
+if (HAS_TWILIO) {
+    app.post('/webhooks/twilio/sms', (req: Request, res: Response) => {
+        const from = req.body?.From ?? '';
+        const to = req.body?.To ?? '';
+        const body = req.body?.Body ?? '';
+        if (from && body) {
+            smsInbox.unshift({
+                from,
+                to,
+                body: String(body).trim(),
+                receivedAt: Date.now(),
+            });
+            if (smsInbox.length > SMS_INBOX_MAX) smsInbox.pop();
+        }
+        res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    });
+}
 
 // ============================================
 // SSE/MCP Endpoints
@@ -981,30 +1116,8 @@ app.get('/auth/login', (req: Request, res: Response) => {
     authUrl.searchParams.set('code_challenge', challenge);
     authUrl.searchParams.set('code_challenge_method', 'S256');
 
-    // Send login page that redirects to Tesla
-    res.send(`
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tesla MCP - Connect Your Tesla</title>
-    <style>${commonStyles}</style>
-</head>
-<body>
-    <div class="container">
-        ${logoSvg}
-        <h1>Connect Your Tesla</h1>
-        <p>You'll be redirected to Tesla's secure login page to connect your Tesla account.</p>
-        <a href="${authUrl.toString()}" class="btn">Connect with Tesla</a>
-        <p class="secure-note">
-            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
-            Your Tesla login is handled securely by Tesla
-        </p>
-    </div>
-</body>
-</html>
-    `);
+    // Redirect straight to Tesla OAuth — no intermediate page
+    res.redirect(authUrl.toString());
 });
 
 // OAuth callback - receives authorization code from Tesla
@@ -1235,6 +1348,13 @@ app.listen(PORT, HOST, () => {
     console.log(`  - Home:  http://${HOST}:${PORT}/`);
     console.log(`  - Setup: http://${HOST}:${PORT}/setup`);
     console.log(`  - SSE:   http://${HOST}:${PORT}/sse`);
-    console.log(`\nUsers can set up their own Tesla Developer credentials.`);
+    if (HAS_SERVER_CREDENTIALS) {
+        console.log(`\n✓ Server Tesla credentials detected (TESLA_CLIENT_ID, TESLA_CLIENT_SECRET).`);
+        console.log(`  Users will be prompted to log in with their Tesla account (no setup needed).`);
+    } else {
+        console.log(`\n⚠ No server Tesla credentials found.`);
+        console.log(`  Set TESLA_CLIENT_ID and TESLA_CLIENT_SECRET environment variables`);
+        console.log(`  so users can log in directly without creating their own Developer App.`);
+    }
     console.log(`Set BASE_URL environment variable for production deployment.`);
 });

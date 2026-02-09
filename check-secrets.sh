@@ -14,6 +14,10 @@ if git grep -n -- 'TESLA_REFRESH_TOKEN\s*=\s*["'"'"'][^"'"'"']*["'"'"']' -- '*.t
   echo "⚠️  Possible hardcoded TESLA_REFRESH_TOKEN"
   exit 1
 fi
+if git grep -n -- 'TWILIO_AUTH_TOKEN\s*=\s*["'"'"'][^"'"'"']*["'"'"']' -- '*.ts' '*.js' '*.json' '*.md' 2>/dev/null; then
+  echo "⚠️  Possible hardcoded TWILIO_AUTH_TOKEN"
+  exit 1
+fi
 if git grep -n -- 'BEGIN.*PRIVATE KEY' -- '*.ts' '*.js' '*.json' '*.md' 2>/dev/null; then
   echo "⚠️  Possible embedded private key"
   exit 1
