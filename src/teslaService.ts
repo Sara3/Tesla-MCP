@@ -48,7 +48,7 @@ const BASE_URLS = {
     'CN': 'https://fleet-api.prd.cn.vn.cloud.tesla.cn'   // China
 };
 const BASE_URL = BASE_URLS.NA; // Default to North America
-const AUTH_URL = 'https://auth.tesla.com/oauth2/v3/token';
+const AUTH_URL = 'https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token';
 
 // Types
 export interface Vehicle {
@@ -109,13 +109,11 @@ export class TeslaService {
                 throw new Error('TESLA_REFRESH_TOKEN is not set in environment variables');
             }
 
-            // Create form data
+            // Create form data per Tesla Fleet API docs
             const params = new URLSearchParams();
             params.append('grant_type', 'refresh_token');
             params.append('client_id', clientId);
-            params.append('client_secret', clientSecret);
             params.append('refresh_token', refreshToken);
-            params.append('scope', 'openid offline_access vehicle_device_data vehicle_cmds vehicle_charging_cmds');
 
             const response = await axios.post(AUTH_URL, params, {
                 headers: {
@@ -126,6 +124,23 @@ export class TeslaService {
             this.accessToken = response.data.access_token;
             // Set token expiration (token is valid for response.data.expires_in seconds)
             this.tokenExpiration = Date.now() + (response.data.expires_in * 1000);
+
+            // Update refresh token if a new one was returned (refresh tokens are single-use)
+            if (response.data.refresh_token) {
+                process.env.TESLA_REFRESH_TOKEN = response.data.refresh_token;
+                // Also update .env file
+                try {
+                    const envPath = path.join(process.cwd(), '.env');
+                    let envContent = fs.readFileSync(envPath, 'utf8');
+                    envContent = envContent.replace(
+                        /TESLA_REFRESH_TOKEN=.*/,
+                        `TESLA_REFRESH_TOKEN=${response.data.refresh_token}`
+                    );
+                    fs.writeFileSync(envPath, envContent);
+                } catch {
+                    // Silently fail if .env can't be updated
+                }
+            }
         } catch (error: any) {
             // Simplify error logging to avoid interfering with JSON
             const errorDetails = error.response?.data || error.message;
@@ -155,10 +170,6 @@ export class TeslaService {
         const token = await this.getAccessToken();
 
         try {
-            if (!this.isRegistered) {
-                throw new Error('Application is not registered with Tesla API. Run "pnpm register" to complete the registration process');
-            }
-
             const response = await axios.get(`${BASE_URL}/api/1/vehicles`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -181,10 +192,6 @@ export class TeslaService {
         const token = await this.getAccessToken();
 
         try {
-            if (!this.isRegistered) {
-                throw new Error('Application is not registered with Tesla API. Run "pnpm register" to complete the registration process');
-            }
-
             const response = await axios.post(`${BASE_URL}/api/1/vehicles/${vehicleId}/wake_up`, {}, {
                 headers: {
                     'Authorization': `Bearer ${token}`,

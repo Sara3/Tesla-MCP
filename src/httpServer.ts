@@ -16,6 +16,7 @@ import cors from 'cors';
 import crypto from 'crypto';
 import axios from 'axios';
 import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -852,6 +853,21 @@ function authenticateMcpBearer(req: Request): string | null {
     }
     return stored.userSessionId;
 }
+
+// Tesla Fleet API public key endpoint (required for partner registration)
+app.get('/.well-known/appspecific/com.tesla.3p.public-key.pem', (_req: Request, res: Response) => {
+    // Try reading from keys/ directory first, then fall back to TESLA_PUBLIC_KEY env var
+    const keyPath = path.join(__dirname, '../keys/public-key.pem');
+    if (fs.existsSync(keyPath)) {
+        res.setHeader('Content-Type', 'application/x-pem-file');
+        res.sendFile(keyPath);
+    } else if (process.env.TESLA_PUBLIC_KEY) {
+        res.setHeader('Content-Type', 'application/x-pem-file');
+        res.send(process.env.TESLA_PUBLIC_KEY);
+    } else {
+        res.status(404).send('Public key not found');
+    }
+});
 
 // Protected Resource Metadata (RFC 9728) — tells the client where to find the authorization server
 app.get('/.well-known/oauth-protected-resource', (_req: Request, res: Response) => {

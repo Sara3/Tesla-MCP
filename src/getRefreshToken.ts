@@ -1,12 +1,14 @@
 /**
  * Utility script to obtain a Tesla API refresh token
  * Following the official Tesla Fleet API OAuth flow
+ * 
+ * Two-step usage:
+ *   Step 1 (open auth URL):  npm run get-token
+ *   Step 2 (exchange code):  npm run get-token -- "https://tesla-mcp.onrender.com/auth/callback?code=...&state=..."
  */
 
 import axios from 'axios';
 import dotenv from 'dotenv';
-import * as http from 'http';
-import { URL } from 'url';
 import { exec } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -32,172 +34,111 @@ if (!clientId || !clientSecret) {
 
 // Constants
 const AUTH_URL = 'https://auth.tesla.com/oauth2/v3';
-const PORT = 3000;
-const REDIRECT_URI = `http://localhost:${PORT}/callback`;
+const TOKEN_URL = 'https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token';
+const AUDIENCE = 'https://fleet-api.prd.na.vn.cloud.tesla.com';
+const REDIRECT_URI = 'https://tesla-mcp.onrender.com/auth/callback';
 const SCOPES = 'openid offline_access vehicle_device_data vehicle_cmds vehicle_charging_cmds';
 
-// Generate PKCE code verifier and challenge
-function generateCodeVerifier() {
-    return crypto.randomBytes(32).toString('base64url');
-}
+// Check if a callback URL was passed as argument (Step 2)
+const callbackArg = process.argv[2];
 
-function generateCodeChallenge(verifier: string) {
-    return crypto.createHash('sha256').update(verifier).digest('base64url');
-}
-
-// Generate random state for security
-const state = crypto.randomBytes(16).toString('base64url');
-const codeVerifier = generateCodeVerifier();
-const codeChallenge = generateCodeChallenge(codeVerifier);
-
-// Authorization URL
-const authUrl = `${AUTH_URL}/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=${encodeURIComponent(SCOPES)}&state=${state}&code_challenge=${codeChallenge}&code_challenge_method=S256`;
-
-// Open the browser for the user to authenticate
-console.log('Opening browser for Tesla authentication...');
-console.log('Please log in with your Tesla account when the browser opens.');
-console.log('\nIf the browser doesn\'t open automatically, paste this URL into your browser:');
-console.log(authUrl);
-
-// Open the URL in the default browser
-try {
-    const command = process.platform === 'darwin' ? 'open' :
-        process.platform === 'win32' ? 'start' : 'xdg-open';
-    exec(`${command} "${authUrl}"`);
-} catch (error: any) {
-    console.log('Failed to open browser automatically. Please open the URL manually.');
-}
-
-// Create a simple HTTP server to handle the callback
-const server = http.createServer(async (req, res) => {
-    if (!req.url) {
-        return;
+async function exchangeCode(callbackUrl: string) {
+    // Parse the callback URL to extract the code
+    let code: string | null = null;
+    try {
+        const parsed = new URL(callbackUrl);
+        code = parsed.searchParams.get('code');
+    } catch {
+        // Maybe they passed just the code itself
+        code = callbackUrl;
     }
 
-    const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
+    if (!code) {
+        console.error('Could not extract authorization code from the URL.');
+        process.exit(1);
+    }
 
-    if (parsedUrl.pathname === '/callback') {
-        const code = parsedUrl.searchParams.get('code');
-        const error = parsedUrl.searchParams.get('error');
-        const returnedState = parsedUrl.searchParams.get('state');
+    console.log('Exchanging authorization code for tokens...');
 
-        // Close response with a success message
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(`
-      <html>
-        <body>
-          <h1>Tesla API Authentication</h1>
-          <p>You can close this window and return to your terminal.</p>
-        </body>
-      </html>
-    `);
+    const params = new URLSearchParams();
+    params.append('grant_type', 'authorization_code');
+    params.append('client_id', clientId!);
+    params.append('client_secret', clientSecret!);
+    params.append('code', code);
+    params.append('audience', AUDIENCE);
+    params.append('redirect_uri', REDIRECT_URI);
 
-        // Handle errors
-        if (error) {
-            console.error(`Authentication error: ${error}`);
-            server.close();
-            process.exit(1);
-        }
+    try {
+        const tokenResponse = await axios.post(TOKEN_URL, params, {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        });
 
-        // Verify state to prevent CSRF attacks
-        if (returnedState !== state) {
-            console.error('Error: State mismatch. Possible CSRF attack.');
-            server.close();
-            process.exit(1);
-        }
+        const { access_token, refresh_token, expires_in } = tokenResponse.data;
 
-        if (code) {
-            try {
-                console.log('\nExchanging authorization code for tokens...');
+        console.log('\nAuthentication successful!\n');
+        console.log('Access token obtained.');
+        console.log('Token expires in:', expires_in, 'seconds');
 
-                // Create form data for the request
-                const params = new URLSearchParams();
-                params.append('grant_type', 'authorization_code');
-                params.append('client_id', clientId);
-                params.append('client_secret', clientSecret);
-                params.append('code', code);
-                params.append('code_verifier', codeVerifier);
-                params.append('redirect_uri', REDIRECT_URI);
+        // Update the .env file with the refresh token
+        try {
+            const envPath = path.resolve(process.cwd(), '.env');
+            let envContent = fs.readFileSync(envPath, 'utf8');
 
-                // Exchange the code for tokens using form URL encoding
-                const tokenResponse = await axios.post(`${AUTH_URL}/token`, params, {
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded'
-                    }
-                });
-
-                const { access_token, refresh_token, expires_in } = tokenResponse.data;
-
-                console.log('\nAuthentication successful!\n');
-                console.log('Access token obtained.');
-                console.log('Token expires in:', expires_in, 'seconds');
-                console.log('Refresh token does not expire unless revoked.');
-
-                // Update the .env file with the refresh token
-                try {
-                    const envPath = path.resolve(process.cwd(), '.env');
-                    let envContent = fs.readFileSync(envPath, 'utf8');
-
-                    // Replace or add the refresh token
-                    if (envContent.includes('TESLA_REFRESH_TOKEN=')) {
-                        envContent = envContent.replace(
-                            /TESLA_REFRESH_TOKEN=.*/,
-                            `TESLA_REFRESH_TOKEN=${refresh_token}`
-                        );
-                    } else {
-                        envContent += `\nTESLA_REFRESH_TOKEN=${refresh_token}\n`;
-                    }
-
-                    fs.writeFileSync(envPath, envContent);
-                    console.log('\nThe refresh token has been saved to your .env file.');
-                } catch (err) {
-                    console.error('Failed to update .env file. Please update it manually with the refresh token above.');
-                }
-
-            } catch (error: any) {
-                console.error('\nError exchanging authorization code for tokens:');
-                if (error.response) {
-                    console.error('Response status:', error.response.status);
-                    console.error('Response data:', JSON.stringify(error.response.data, null, 2));
-
-                    // Specific error handling for common issues
-                    if (error.response.data && error.response.data.error === 'invalid_grant') {
-                        console.error('\nThe authorization code is invalid or expired. Please try again.');
-                    } else if (error.response.data && error.response.data.error === 'invalid_request') {
-                        console.error('\nInvalid request. Check if the redirect_uri matches exactly what is configured in the Tesla Developer Console.');
-                    }
-                } else if (error.request) {
-                    console.error('No response received from server:', error.request);
-                } else {
-                    console.error('Error message:', error.message);
-                }
+            if (envContent.includes('TESLA_REFRESH_TOKEN=')) {
+                envContent = envContent.replace(
+                    /TESLA_REFRESH_TOKEN=.*/,
+                    `TESLA_REFRESH_TOKEN=${refresh_token}`
+                );
+            } else {
+                envContent += `\nTESLA_REFRESH_TOKEN=${refresh_token}\n`;
             }
 
-            // Close the server
-            server.close();
-            process.exit(0);
+            fs.writeFileSync(envPath, envContent);
+            console.log('The refresh token has been saved to your .env file.');
+        } catch (err) {
+            console.error('Failed to update .env file automatically.');
+            console.log('\nAdd this to your .env file:');
+            console.log(`TESLA_REFRESH_TOKEN=${refresh_token}`);
+        }
+    } catch (error: any) {
+        console.error('\nError exchanging authorization code for tokens:');
+        if (error.response) {
+            console.error('Status:', error.response.status);
+            console.error('Data:', JSON.stringify(error.response.data, null, 2));
+        } else {
+            console.error(error.message);
         }
     }
-});
 
-// Attempt to start the server with error handling for port conflicts
-function startServer() {
-    server.on('error', (error: Error & { code?: string }) => {
-        if (error.code === 'EADDRINUSE') {
-            console.error(`\nError: Port ${PORT} is already in use.`);
-            console.error('The MCP server is likely running on this port.');
-            console.error('Please stop the MCP server before running this script, or update your Tesla Developer Portal settings to use a different port.');
-            process.exit(1);
-        } else {
-            console.error('Server error:', error);
-            process.exit(1);
-        }
-    });
-
-    // Start the server
-    server.listen(PORT, () => {
-        console.log(`\nListening for Tesla API callback on http://localhost:${PORT}`);
-    });
+    process.exit(0);
 }
 
-startServer(); 
+function openAuthUrl() {
+    const state = crypto.randomBytes(16).toString('base64url');
+
+    const authUrl = `${AUTH_URL}/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=${encodeURIComponent(SCOPES)}&state=${state}`;
+
+    console.log('Opening browser for Tesla authentication...\n');
+    console.log('If the browser doesn\'t open, paste this URL manually:');
+    console.log(authUrl);
+
+    try {
+        const command = process.platform === 'darwin' ? 'open' :
+            process.platform === 'win32' ? 'start' : 'xdg-open';
+        exec(`${command} "${authUrl}"`);
+    } catch {
+        // Browser open failed silently
+    }
+
+    console.log('\n--- NEXT STEP ---');
+    console.log('After logging in, you\'ll be redirected to tesla-mcp.onrender.com.');
+    console.log('Copy the FULL URL from your browser and run:\n');
+    console.log('  npm run get-token -- "PASTE_CALLBACK_URL_HERE"\n');
+}
+
+// Main
+if (callbackArg) {
+    exchangeCode(callbackArg);
+} else {
+    openAuthUrl();
+} 
