@@ -37,7 +37,7 @@
     "dev:http": "node --loader ts-node/esm src/httpServer.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.7.0",
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "axios": "^1.8.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",

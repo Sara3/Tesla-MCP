@@ -17,6 +17,12 @@ export interface UserSession {
     codeVerifier?: string;
     createdAt: number;
     lastActivity: number;
+    // MCP OAuth flow (when auth initiated via /oauth/authorize from an MCP client)
+    oauthClientId?: string;
+    oauthRedirectUri?: string;
+    oauthClientState?: string;
+    oauthCodeChallenge?: string;
+    oauthCodeChallengeMethod?: string;
 }
 
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours

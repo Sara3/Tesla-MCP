@@ -13,6 +13,7 @@
 
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import crypto from 'crypto';
 import axios from 'axios';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -20,6 +21,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
     CallToolRequestSchema,
     ListResourcesRequestSchema,
@@ -68,8 +70,34 @@ app.use((req, res, next) => {
     express.urlencoded({ extended: true })(req, res, next);
 });
 
-// Store active transports and their sessions
+// Store active SSE transports and their sessions
 const activeTransports: Map<string, { transport: SSEServerTransport; server: Server }> = new Map();
+
+// Store active Streamable HTTP transports (for /mcp endpoint)
+const mcpHttpTransports: Map<string, { transport: StreamableHTTPServerTransport; server: Server; userSessionId: string }> = new Map();
+
+// ============================================
+// MCP OAuth 2.1 Authorization Server stores
+// ============================================
+
+// Registered OAuth clients (dynamic client registration)
+const oauthClients: Map<string, { client_id: string; client_secret: string; redirect_uris: string[] }> = new Map();
+
+// Auth codes (short-lived, maps code → session info for token exchange)
+const oauthAuthCodes: Map<string, {
+    userSessionId: string;
+    clientId: string;
+    redirectUri: string;
+    codeChallenge: string;
+    codeChallengeMethod: string;
+    expiresAt: number;
+}> = new Map();
+
+// MCP bearer tokens (maps token → user session)
+const mcpBearerTokens: Map<string, { userSessionId: string; expiresAt: number }> = new Map();
+
+// MCP refresh tokens (maps token → user session + client)
+const mcpRefreshTokens: Map<string, { userSessionId: string; clientId: string }> = new Map();
 
 // Vehicle cache per session
 const vehiclesCache: Map<string, { vehicles: Vehicle[]; lastFetch: number }> = new Map();
@@ -172,24 +200,6 @@ function createMCPServer(sessionId: string): Server {
     // Handler that lists available tools - always show all tools so the UI shows full capability
     server.setRequestHandler(ListToolsRequestSchema, async () => {
         const tools = [
-            {
-                name: "get_setup_url",
-                description: "Get the URL to set up your Tesla Developer App credentials (Client ID and Secret). Open this link first if you haven't connected Tesla yet.",
-                inputSchema: {
-                    type: "object",
-                    properties: {},
-                    required: []
-                }
-            },
-            {
-                name: "get_auth_url",
-                description: "Get the URL to connect your Tesla account (log in with your Tesla email and password). Use this after you've set up credentials.",
-                inputSchema: {
-                    type: "object",
-                    properties: {},
-                    required: []
-                }
-            },
             {
                 name: "wake_up",
                 description: "Wake up your Tesla vehicle from sleep mode. Requires vehicle_id (id, vehicle_id, or vin).",
@@ -299,42 +309,6 @@ function createMCPServer(sessionId: string): Server {
         const getAuthUrl = () => `${BASE_URL}/auth/login?session=${sessionId}`;
 
         switch (request.params.name) {
-            case "get_setup_url": {
-                const loginUrl = getAuthUrl();
-                if (HAS_SERVER_CREDENTIALS || teslaService.hasCredentials()) {
-                    return {
-                        content: [{
-                            type: "text",
-                            text: `Connect your Tesla account:\n\n**Open this link:** ${loginUrl}\n\nLog in with your Tesla email and password. After you connect, your Tesla tools will work.`
-                        }]
-                    };
-                }
-                return {
-                    content: [{
-                        type: "text",
-                        text: `Set up your Tesla Developer App credentials:\n\n**Open this link:** ${BASE_URL}/setup?session=${sessionId}\n\n1. Create an app at https://developer.tesla.com\n2. Set redirect URI to: ${BASE_URL}/auth/callback\n3. Enter your Client ID and Client Secret on the setup page\n\nAfter you connect Tesla, the success page will show a **connection URL**. Add that URL as your MCP server URL in your client so you stay logged in across reconnects. Keep it private.`
-                    }]
-                };
-            }
-
-            case "get_auth_url": {
-                const loginUrl = getAuthUrl();
-                if (HAS_SERVER_CREDENTIALS || teslaService.hasCredentials()) {
-                    return {
-                        content: [{
-                            type: "text",
-                            text: `Connect your Tesla account:\n\n**Open this link:** ${loginUrl}\n\nLog in with your Tesla email and password.`
-                        }]
-                    };
-                }
-                return {
-                    content: [{
-                        type: "text",
-                        text: `Set up credentials first: ${BASE_URL}/setup?session=${sessionId}`
-                    }]
-                };
-            }
-
             case "list_vehicles": {
                 if (!HAS_SERVER_CREDENTIALS && !teslaService.hasCredentials()) {
                     return {
@@ -863,6 +837,259 @@ const successSvg = `
 `;
 
 // ============================================
+// MCP OAuth 2.1 Authorization Server Endpoints
+// ============================================
+
+/** Validate a bearer token from the Authorization header, return userSessionId or null */
+function authenticateMcpBearer(req: Request): string | null {
+    const auth = req.headers.authorization;
+    if (!auth?.startsWith('Bearer ')) return null;
+    const token = auth.slice(7);
+    const stored = mcpBearerTokens.get(token);
+    if (!stored || stored.expiresAt < Date.now()) {
+        if (stored) mcpBearerTokens.delete(token);
+        return null;
+    }
+    return stored.userSessionId;
+}
+
+// Protected Resource Metadata (RFC 9728) — tells the client where to find the authorization server
+app.get('/.well-known/oauth-protected-resource', (_req: Request, res: Response) => {
+    res.json({
+        resource: BASE_URL,
+        authorization_servers: [BASE_URL],
+        scopes_supported: ['tesla'],
+    });
+});
+
+// OAuth Authorization Server Metadata (RFC 8414)
+app.get('/.well-known/oauth-authorization-server', (_req: Request, res: Response) => {
+    res.json({
+        issuer: BASE_URL,
+        authorization_endpoint: `${BASE_URL}/oauth/authorize`,
+        token_endpoint: `${BASE_URL}/oauth/token`,
+        registration_endpoint: `${BASE_URL}/oauth/register`,
+        response_types_supported: ['code'],
+        grant_types_supported: ['authorization_code', 'refresh_token'],
+        code_challenge_methods_supported: ['S256'],
+        token_endpoint_auth_methods_supported: ['client_secret_post', 'none'],
+        scopes_supported: ['tesla'],
+    });
+});
+
+// Dynamic Client Registration (RFC 7591) — MCP clients register to get a client_id
+app.post('/oauth/register', (req: Request, res: Response) => {
+    const { redirect_uris, client_name, grant_types, response_types, token_endpoint_auth_method } = req.body ?? {};
+    if (!redirect_uris || !Array.isArray(redirect_uris) || redirect_uris.length === 0) {
+        return res.status(400).json({ error: 'invalid_client_metadata', error_description: 'redirect_uris is required' });
+    }
+    const client_id = crypto.randomBytes(16).toString('hex');
+    const client_secret = crypto.randomBytes(32).toString('hex');
+    oauthClients.set(client_id, { client_id, client_secret, redirect_uris });
+    res.status(201).json({
+        client_id,
+        client_secret,
+        redirect_uris,
+        client_name: client_name || 'MCP Client',
+        grant_types: grant_types || ['authorization_code', 'refresh_token'],
+        response_types: response_types || ['code'],
+        token_endpoint_auth_method: token_endpoint_auth_method || 'client_secret_post',
+    });
+});
+
+// OAuth Authorization Endpoint — MCP client sends user here (popup opens this URL)
+// We redirect straight to Tesla OAuth, then Tesla callback redirects back to MCP client
+app.get('/oauth/authorize', (req: Request, res: Response) => {
+    const client_id = req.query.client_id as string;
+    const redirect_uri = req.query.redirect_uri as string;
+    const state = req.query.state as string;
+    const code_challenge = req.query.code_challenge as string;
+    const code_challenge_method = (req.query.code_challenge_method as string) || 'S256';
+    const response_type = req.query.response_type as string;
+
+    if (response_type !== 'code') {
+        return res.status(400).json({ error: 'unsupported_response_type' });
+    }
+
+    const client = oauthClients.get(client_id);
+    if (!client) {
+        return res.status(400).json({ error: 'invalid_client', error_description: 'Unknown client_id. Register first via /oauth/register.' });
+    }
+
+    if (!client.redirect_uris.includes(redirect_uri)) {
+        return res.status(400).json({ error: 'invalid_redirect_uri' });
+    }
+
+    // Create a user session for Tesla auth
+    const userSession = sessionManager.createSession();
+
+    // Inject server Tesla credentials so user goes straight to Tesla login
+    if (HAS_SERVER_CREDENTIALS) {
+        sessionManager.updateSession(userSession.sessionId, {
+            clientId: SERVER_CLIENT_ID,
+            clientSecret: SERVER_CLIENT_SECRET,
+        });
+    }
+
+    // Store MCP client's OAuth params so /auth/callback knows where to redirect
+    sessionManager.updateSession(userSession.sessionId, {
+        oauthClientId: client_id,
+        oauthRedirectUri: redirect_uri,
+        oauthClientState: state,
+        oauthCodeChallenge: code_challenge,
+        oauthCodeChallengeMethod: code_challenge_method,
+    });
+
+    // Redirect to Tesla auth (auto-redirects to Tesla login page)
+    res.redirect(`${BASE_URL}/auth/login?session=${userSession.sessionId}`);
+});
+
+// OAuth Token Endpoint — MCP client exchanges auth code or refresh token for access token
+app.post('/oauth/token', (req: Request, res: Response) => {
+    const { grant_type, code, redirect_uri, client_id, code_verifier, refresh_token } = req.body ?? {};
+
+    if (grant_type === 'authorization_code') {
+        const authCode = oauthAuthCodes.get(code);
+        if (!authCode || authCode.expiresAt < Date.now()) {
+            oauthAuthCodes.delete(code);
+            return res.status(400).json({ error: 'invalid_grant', error_description: 'Invalid or expired authorization code' });
+        }
+
+        if (authCode.clientId !== client_id || authCode.redirectUri !== redirect_uri) {
+            return res.status(400).json({ error: 'invalid_grant', error_description: 'client_id or redirect_uri mismatch' });
+        }
+
+        // Verify PKCE
+        if (authCode.codeChallenge) {
+            const expectedChallenge = crypto.createHash('sha256').update(code_verifier || '').digest('base64url');
+            if (expectedChallenge !== authCode.codeChallenge) {
+                return res.status(400).json({ error: 'invalid_grant', error_description: 'PKCE verification failed' });
+            }
+        }
+
+        // Issue MCP access token + refresh token
+        const accessToken = crypto.randomBytes(32).toString('hex');
+        const mcpRefresh = crypto.randomBytes(32).toString('hex');
+        const expiresIn = 3600; // 1 hour
+
+        mcpBearerTokens.set(accessToken, {
+            userSessionId: authCode.userSessionId,
+            expiresAt: Date.now() + (expiresIn * 1000),
+        });
+
+        mcpRefreshTokens.set(mcpRefresh, {
+            userSessionId: authCode.userSessionId,
+            clientId: authCode.clientId,
+        });
+
+        oauthAuthCodes.delete(code);
+
+        return res.json({
+            access_token: accessToken,
+            token_type: 'bearer',
+            expires_in: expiresIn,
+            refresh_token: mcpRefresh,
+        });
+    }
+
+    if (grant_type === 'refresh_token') {
+        const stored = mcpRefreshTokens.get(refresh_token);
+        if (!stored) {
+            return res.status(400).json({ error: 'invalid_grant', error_description: 'Invalid refresh token' });
+        }
+
+        const accessToken = crypto.randomBytes(32).toString('hex');
+        const expiresIn = 3600;
+
+        mcpBearerTokens.set(accessToken, {
+            userSessionId: stored.userSessionId,
+            expiresAt: Date.now() + (expiresIn * 1000),
+        });
+
+        return res.json({
+            access_token: accessToken,
+            token_type: 'bearer',
+            expires_in: expiresIn,
+        });
+    }
+
+    return res.status(400).json({ error: 'unsupported_grant_type' });
+});
+
+// ============================================
+// Streamable HTTP MCP Endpoint (/mcp)
+// ============================================
+
+app.post('/mcp', async (req: Request, res: Response) => {
+    // Require bearer token
+    const userSessionId = authenticateMcpBearer(req);
+    if (!userSessionId) {
+        res.status(401).set({
+            'WWW-Authenticate': `Bearer resource_metadata="${BASE_URL}/.well-known/oauth-protected-resource"`,
+        }).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Unauthorized' }, id: null });
+        return;
+    }
+
+    const mcpSessionId = req.headers['mcp-session-id'] as string | undefined;
+
+    if (mcpSessionId && mcpHttpTransports.has(mcpSessionId)) {
+        // Existing session — forward to its transport
+        const { transport } = mcpHttpTransports.get(mcpSessionId)!;
+        await transport.handleRequest(req, res, req.body);
+    } else if (!mcpSessionId) {
+        // New session initialization
+        const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => crypto.randomUUID(),
+            onsessioninitialized: (sid) => {
+                mcpHttpTransports.set(sid, { transport, server, userSessionId });
+            },
+        });
+
+        transport.onclose = () => {
+            if (transport.sessionId) {
+                mcpHttpTransports.delete(transport.sessionId);
+            }
+        };
+
+        const server = createMCPServer(userSessionId);
+        await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+    } else {
+        res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Invalid session. Reconnect without mcp-session-id.' }, id: null });
+    }
+});
+
+app.get('/mcp', async (req: Request, res: Response) => {
+    const userSessionId = authenticateMcpBearer(req);
+    if (!userSessionId) {
+        res.status(401).set({
+            'WWW-Authenticate': `Bearer resource_metadata="${BASE_URL}/.well-known/oauth-protected-resource"`,
+        }).send('Unauthorized');
+        return;
+    }
+
+    const mcpSessionId = req.headers['mcp-session-id'] as string;
+    if (!mcpSessionId || !mcpHttpTransports.has(mcpSessionId)) {
+        res.status(400).json({ error: 'Invalid or missing mcp-session-id' });
+        return;
+    }
+
+    const { transport } = mcpHttpTransports.get(mcpSessionId)!;
+    await transport.handleRequest(req, res);
+});
+
+app.delete('/mcp', async (req: Request, res: Response) => {
+    const mcpSessionId = req.headers['mcp-session-id'] as string;
+    if (mcpSessionId && mcpHttpTransports.has(mcpSessionId)) {
+        const { transport, server } = mcpHttpTransports.get(mcpSessionId)!;
+        await transport.close();
+        await server.close();
+        mcpHttpTransports.delete(mcpSessionId);
+    }
+    res.status(200).end();
+});
+
+// ============================================
 // Twilio SMS webhook (inbound texts)
 // ============================================
 if (HAS_TWILIO) {
@@ -1127,6 +1354,19 @@ app.get('/auth/callback', async (req: Request, res: Response) => {
     const error = req.query.error as string;
 
     if (error) {
+        // If this was an MCP OAuth flow, redirect error back to the MCP client
+        if (stateParam) {
+            const [errSessionId] = stateParam.split(':');
+            const errSession = errSessionId ? sessionManager.getSession(errSessionId) : undefined;
+            if (errSession?.oauthRedirectUri) {
+                const redirectUrl = new URL(errSession.oauthRedirectUri);
+                redirectUrl.searchParams.set('error', error);
+                if (errSession.oauthClientState) {
+                    redirectUrl.searchParams.set('state', errSession.oauthClientState);
+                }
+                return res.redirect(redirectUrl.toString());
+            }
+        }
         return res.status(400).send(`
 <!DOCTYPE html>
 <html lang="en">
@@ -1193,6 +1433,28 @@ app.get('/auth/callback', async (req: Request, res: Response) => {
             tokenExpiration: Date.now() + (expires_in * 1000),
         });
 
+        // If this was an MCP OAuth flow, generate auth code and redirect to MCP client
+        const oauthSession = sessionManager.getSession(sessionId);
+        if (oauthSession?.oauthRedirectUri) {
+            const mcpAuthCode = crypto.randomBytes(32).toString('hex');
+            oauthAuthCodes.set(mcpAuthCode, {
+                userSessionId: sessionId,
+                clientId: oauthSession.oauthClientId!,
+                redirectUri: oauthSession.oauthRedirectUri,
+                codeChallenge: oauthSession.oauthCodeChallenge || '',
+                codeChallengeMethod: oauthSession.oauthCodeChallengeMethod || 'S256',
+                expiresAt: Date.now() + 5 * 60 * 1000, // 5 minutes
+            });
+
+            const redirectUrl = new URL(oauthSession.oauthRedirectUri);
+            redirectUrl.searchParams.set('code', mcpAuthCode);
+            if (oauthSession.oauthClientState) {
+                redirectUrl.searchParams.set('state', oauthSession.oauthClientState);
+            }
+            return res.redirect(redirectUrl.toString());
+        }
+
+        // Regular SSE flow — show success page
         const connectionToken = sessionManager.createConnectionToken(sessionId);
         const connectionUrl = `${BASE_URL}/sse?token=${connectionToken}`;
 
@@ -1221,6 +1483,18 @@ app.get('/auth/callback', async (req: Request, res: Response) => {
         `);
 
     } catch (error: any) {
+        // If this was an MCP OAuth flow, redirect error back to the MCP client
+        const failedSession = sessionManager.getSession(sessionId);
+        if (failedSession?.oauthRedirectUri) {
+            const redirectUrl = new URL(failedSession.oauthRedirectUri);
+            redirectUrl.searchParams.set('error', 'server_error');
+            redirectUrl.searchParams.set('error_description', 'Failed to exchange Tesla authorization code');
+            if (failedSession.oauthClientState) {
+                redirectUrl.searchParams.set('state', failedSession.oauthClientState);
+            }
+            return res.redirect(redirectUrl.toString());
+        }
+
         // Do not log token/API response details (security)
         res.status(500).send(`
 <!DOCTYPE html>
@@ -1346,8 +1620,9 @@ app.listen(PORT, HOST, () => {
     console.log(`Tesla MCP Server running at http://${HOST}:${PORT}`);
     console.log(`\nEndpoints:`);
     console.log(`  - Home:  http://${HOST}:${PORT}/`);
+    console.log(`  - MCP:   http://${HOST}:${PORT}/mcp  (Streamable HTTP + OAuth)`);
+    console.log(`  - SSE:   http://${HOST}:${PORT}/sse   (legacy SSE transport)`);
     console.log(`  - Setup: http://${HOST}:${PORT}/setup`);
-    console.log(`  - SSE:   http://${HOST}:${PORT}/sse`);
     if (HAS_SERVER_CREDENTIALS) {
         console.log(`\n✓ Server Tesla credentials detected (TESLA_CLIENT_ID, TESLA_CLIENT_SECRET).`);
         console.log(`  Users will be prompted to log in with their Tesla account (no setup needed).`);
