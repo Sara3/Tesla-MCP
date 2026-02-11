@@ -14,7 +14,7 @@ const BASE_URLS = {
     'CN': 'https://fleet-api.prd.cn.vn.cloud.tesla.cn'   // China
 };
 const BASE_URL = BASE_URLS.NA; // Default to North America
-const AUTH_URL = 'https://auth.tesla.com/oauth2/v3/token';
+const AUTH_URL = 'https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token';
 
 // Types
 export interface Vehicle {
@@ -180,7 +180,8 @@ export class UserTeslaService {
         const token = await this.getAccessToken();
 
         try {
-            const response = await axios.get(`${BASE_URL}/api/1/vehicles/${vehicleId}/vehicle_data`, {
+            const endpoints = 'drive_state;location_data;charge_state;climate_state;vehicle_state;vehicle_config;gui_settings';
+            const response = await axios.get(`${BASE_URL}/api/1/vehicles/${vehicleId}/vehicle_data?endpoints=${encodeURIComponent(endpoints)}`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json',
