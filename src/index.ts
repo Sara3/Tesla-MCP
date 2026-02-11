@@ -372,7 +372,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "get_vehicle_location": {
       const vid = String(request.params.arguments?.vehicle_id);
       const vehicle = await findVehicle(vid);
-      const data = await teslaService.getVehicleData(vid);
+      // Use the matched vehicle's id and request location data
+      const data = await teslaService.getVehicleData(String(vehicle.id), true);
       const lat = data.latitude ?? data.native_latitude;
       const lon = data.longitude ?? data.native_longitude;
       const name = vehicle.display_name || "Tesla";
@@ -381,7 +382,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const mapsUrl = `https://www.google.com/maps?q=${lat},${lon}`;
         return { content: [{ type: "text", text: `${name} location:\n• Latitude: ${lat}\n• Longitude: ${lon}\n• Map: ${mapsUrl}\n• Heading: ${data.heading ?? "—"}\n• Speed: ${data.speed ?? "—"}\n• Shift: ${data.shift_state ?? "—"}` }] };
       }
-      return { content: [{ type: "text", text: `Location not available for ${name}. Try wake_up first.` }] };
+      const debugFields = data._debug_fields_present ?? Object.keys(data).slice(0, 20);
+      return { content: [{ type: "text", text: `Location not available for ${name}.\n\nPossible causes:\n• Vehicle may need wake_up first\n• "Allow Mobile Access" must be enabled in vehicle Settings > Safety\n• Location sharing icon should appear on the vehicle screen when fetched\n\nAPI returned these data sections: ${JSON.stringify(debugFields)}\ndrive_state present: ${!!data.drive_state}\nlocation_data present: ${!!data.location_data}` }] };
     }
 
     case "get_battery_status": {
@@ -596,11 +598,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const vehicle = await findVehicle(vid);
       const name = vehicle.display_name || "Tesla";
 
-      const vData = await teslaService.getVehicleData(vid);
+      const vData = await teslaService.getVehicleData(String(vehicle.id), true);
       const lat = vData.latitude ?? vData.native_latitude ?? 0;
       const lon = vData.longitude ?? vData.native_longitude ?? 0;
 
-      await teslaService.sendCommand(vid, 'window_control', { command: action, lat, lon });
+      await teslaService.sendCommand(String(vehicle.id), 'window_control', { command: action, lat, lon });
       return { content: [{ type: "text", text: `${name} windows ${action === 'vent' ? 'vented' : 'closed'}.` }] };
     }
 

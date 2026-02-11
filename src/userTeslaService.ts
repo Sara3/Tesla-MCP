@@ -165,7 +165,7 @@ export class UserTeslaService {
      * Get vehicle data (live call to vehicle - may wake it).
      * Returns the full vehicle data response including all requested endpoint data.
      */
-    async getVehicleData(vehicleId: string): Promise<{
+    async getVehicleData(vehicleId: string, includeLocation: boolean = false): Promise<{
         latitude?: number;
         longitude?: number;
         heading?: number;
@@ -186,7 +186,10 @@ export class UserTeslaService {
         const token = await this.getAccessToken();
 
         try {
-            const endpoints = 'drive_state;location_data;charge_state;climate_state;vehicle_state;vehicle_config;gui_settings';
+            const baseEndpoints = 'charge_state;climate_state;vehicle_state;vehicle_config;gui_settings';
+            const endpoints = includeLocation
+                ? `drive_state;location_data;${baseEndpoints}`
+                : `drive_state;${baseEndpoints}`;
             const response = await axios.get(`${BASE_URL}/api/1/vehicles/${vehicleId}/vehicle_data?endpoints=${encodeURIComponent(endpoints)}`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -199,7 +202,7 @@ export class UserTeslaService {
                 throw new Error('No vehicle data in response');
             }
 
-            // Fleet API may return drive_state with lat/long, or location_data
+            // Fleet API may return location in drive_state, location_data, or both
             const driveState = data.drive_state;
             const locationData = data.location_data;
 
@@ -213,8 +216,14 @@ export class UserTeslaService {
                 native_latitude?: number;
                 native_longitude?: number;
                 native_location_supported?: boolean;
+                _debug_fields_present?: string[];
                 [key: string]: unknown;
             } = { ...data };
+
+            // Track which data sections the API returned (for debugging)
+            result._debug_fields_present = Object.keys(data).filter(k =>
+                data[k] != null && typeof data[k] === 'object'
+            );
 
             if (driveState) {
                 result.latitude = driveState.latitude;
@@ -227,9 +236,12 @@ export class UserTeslaService {
                 result.native_longitude = driveState.native_longitude;
                 result.native_location_supported = driveState.native_location_supported;
             }
+            // location_data is the newer method (firmware 2023.38+)
             if (locationData) {
                 result.latitude = result.latitude ?? locationData.latitude;
                 result.longitude = result.longitude ?? locationData.longitude;
+                result.native_latitude = result.native_latitude ?? locationData.native_latitude;
+                result.native_longitude = result.native_longitude ?? locationData.native_longitude;
             }
 
             return result;

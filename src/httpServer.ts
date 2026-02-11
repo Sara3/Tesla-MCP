@@ -53,7 +53,7 @@ const HAS_SERVER_CREDENTIALS = !!(SERVER_CLIENT_ID && SERVER_CLIENT_SECRET);
 
 // OAuth constants
 const AUTH_URL = 'https://auth.tesla.com/oauth2/v3';
-const SCOPES = 'openid offline_access vehicle_device_data vehicle_cmds vehicle_charging_cmds';
+const SCOPES = 'openid offline_access vehicle_device_data vehicle_location vehicle_cmds vehicle_charging_cmds';
 
 const app = express();
 app.use(cors());
@@ -539,7 +539,8 @@ function createMCPServer(sessionId: string): Server {
                 }
 
                 try {
-                    const data = await teslaService.getVehicleData(locationVehicleId);
+                    // Use the matched vehicle's id and request location data
+                    const data = await teslaService.getVehicleData(String(locationVehicle.id), true);
                     const lat = data.latitude ?? data.native_latitude;
                     const lon = data.longitude ?? data.native_longitude;
                     const name = locationVehicle.display_name || "Tesla";
@@ -551,10 +552,12 @@ function createMCPServer(sessionId: string): Server {
                             content: [{ type: "text", text }]
                         };
                     }
+                    // Show debug info so we can diagnose why location is missing
+                    const debugFields = data._debug_fields_present ?? Object.keys(data).slice(0, 20);
                     return {
                         content: [{
                             type: "text",
-                            text: `Location not available for ${name} (vehicle may be asleep or location not shared). Try wake_up first, or check Tesla app location settings. Raw: ${JSON.stringify(data, null, 2)}`
+                            text: `Location not available for ${name}.\n\nPossible causes:\n• Vehicle may need wake_up first\n• "Allow Mobile Access" must be enabled in vehicle Settings > Safety\n• Location sharing icon should appear on the vehicle screen when fetched\n\nAPI returned these data sections: ${JSON.stringify(debugFields)}\ndrive_state present: ${!!data.drive_state}\nlocation_data present: ${!!data.location_data}`
                         }]
                     };
                 } catch (error: any) {
@@ -1027,7 +1030,7 @@ function createMCPServer(sessionId: string): Server {
                 const name = veh.display_name || "Tesla";
 
                 // Window control requires lat/lon for security
-                const vData = await teslaService.getVehicleData(vid);
+                const vData = await teslaService.getVehicleData(vid, true);
                 const lat = vData.latitude ?? vData.native_latitude ?? 0;
                 const lon = vData.longitude ?? vData.native_longitude ?? 0;
 

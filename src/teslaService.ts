@@ -209,11 +209,14 @@ export class TeslaService {
      * Get vehicle data (live call to vehicle - may wake it).
      * Returns full vehicle data including all requested endpoint data.
      */
-    async getVehicleData(vehicleId: string): Promise<any> {
+    async getVehicleData(vehicleId: string, includeLocation: boolean = false): Promise<any> {
         const token = await this.getAccessToken();
 
         try {
-            const endpoints = 'drive_state;location_data;charge_state;climate_state;vehicle_state;vehicle_config;gui_settings';
+            const baseEndpoints = 'charge_state;climate_state;vehicle_state;vehicle_config;gui_settings';
+            const endpoints = includeLocation
+                ? `drive_state;location_data;${baseEndpoints}`
+                : `drive_state;${baseEndpoints}`;
             const response = await axios.get(`${BASE_URL}/api/1/vehicles/${vehicleId}/vehicle_data?endpoints=${encodeURIComponent(endpoints)}`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -230,6 +233,11 @@ export class TeslaService {
             const locationData = data.location_data;
             const result: any = { ...data };
 
+            // Track which data sections the API returned (for debugging)
+            result._debug_fields_present = Object.keys(data).filter((k: string) =>
+                data[k] != null && typeof data[k] === 'object'
+            );
+
             if (driveState) {
                 result.latitude = driveState.latitude;
                 result.longitude = driveState.longitude;
@@ -239,9 +247,12 @@ export class TeslaService {
                 result.native_latitude = driveState.native_latitude;
                 result.native_longitude = driveState.native_longitude;
             }
+            // location_data is the newer method (firmware 2023.38+)
             if (locationData) {
                 result.latitude = result.latitude ?? locationData.latitude;
                 result.longitude = result.longitude ?? locationData.longitude;
+                result.native_latitude = result.native_latitude ?? locationData.native_latitude;
+                result.native_longitude = result.native_longitude ?? locationData.native_longitude;
             }
 
             return result;
