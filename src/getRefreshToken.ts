@@ -116,7 +116,7 @@ async function exchangeCode(callbackUrl: string) {
 function openAuthUrl() {
     const state = crypto.randomBytes(16).toString('base64url');
 
-    const authUrl = `${AUTH_URL}/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=${encodeURIComponent(SCOPES)}&state=${state}`;
+    const authUrl = `${AUTH_URL}/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=${encodeURIComponent(SCOPES)}&state=${state}&prompt_missing_scopes=true&require_requested_scopes=true`;
 
     console.log('Opening browser for Tesla authentication...\n');
     console.log('If the browser doesn\'t open, paste this URL manually:');
