@@ -204,6 +204,99 @@ export class TeslaService {
             throw new Error(`Failed to wake up vehicle: ${error.message}`);
         }
     }
+
+    /**
+     * Get vehicle data (live call to vehicle - may wake it).
+     * Returns full vehicle data including all requested endpoint data.
+     */
+    async getVehicleData(vehicleId: string): Promise<any> {
+        const token = await this.getAccessToken();
+
+        try {
+            const endpoints = 'drive_state;location_data;charge_state;climate_state;vehicle_state;vehicle_config;gui_settings';
+            const response = await axios.get(`${BASE_URL}/api/1/vehicles/${vehicleId}/vehicle_data?endpoints=${encodeURIComponent(endpoints)}`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            const data = response.data?.response;
+            if (!data) {
+                throw new Error('No vehicle data in response');
+            }
+
+            const driveState = data.drive_state;
+            const locationData = data.location_data;
+            const result: any = { ...data };
+
+            if (driveState) {
+                result.latitude = driveState.latitude;
+                result.longitude = driveState.longitude;
+                result.heading = driveState.heading;
+                result.speed = driveState.speed;
+                result.shift_state = driveState.shift_state;
+                result.native_latitude = driveState.native_latitude;
+                result.native_longitude = driveState.native_longitude;
+            }
+            if (locationData) {
+                result.latitude = result.latitude ?? locationData.latitude;
+                result.longitude = result.longitude ?? locationData.longitude;
+            }
+
+            return result;
+        } catch (error: any) {
+            throw new Error(`Failed to get vehicle data: ${error.message}`);
+        }
+    }
+
+    /**
+     * Send a command to a vehicle.
+     */
+    async sendCommand(vehicleId: string, command: string, body: Record<string, any> = {}): Promise<any> {
+        const token = await this.getAccessToken();
+
+        try {
+            const response = await axios.post(
+                `${BASE_URL}/api/1/vehicles/${vehicleId}/command/${command}`,
+                body,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                }
+            );
+
+            return response.data.response;
+        } catch (error: any) {
+            const msg = error.response?.data?.error ?? error.message;
+            throw new Error(`Command '${command}' failed: ${msg}`);
+        }
+    }
+
+    /**
+     * Get nearby charging sites for a vehicle.
+     */
+    async getNearbyCharging(vehicleId: string): Promise<any> {
+        const token = await this.getAccessToken();
+
+        try {
+            const response = await axios.get(
+                `${BASE_URL}/api/1/vehicles/${vehicleId}/nearby_charging_sites`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                }
+            );
+
+            return response.data.response;
+        } catch (error: any) {
+            throw new Error(`Failed to get nearby charging sites: ${error.message}`);
+        }
+    }
 }
 
 // Create and export default instance
