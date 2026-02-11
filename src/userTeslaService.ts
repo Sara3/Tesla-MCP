@@ -163,7 +163,7 @@ export class UserTeslaService {
 
     /**
      * Get vehicle data (live call to vehicle - may wake it).
-     * Includes location (latitude, longitude) when available from drive_state or location_data.
+     * Returns the full vehicle data response including all requested endpoint data.
      */
     async getVehicleData(vehicleId: string): Promise<{
         latitude?: number;
@@ -175,6 +175,12 @@ export class UserTeslaService {
         native_latitude?: number;
         native_longitude?: number;
         native_location_supported?: boolean;
+        charge_state?: any;
+        climate_state?: any;
+        vehicle_state?: any;
+        vehicle_config?: any;
+        gui_settings?: any;
+        drive_state?: any;
         [key: string]: unknown;
     }> {
         const token = await this.getAccessToken();
@@ -229,6 +235,55 @@ export class UserTeslaService {
             return result;
         } catch (error: any) {
             throw new Error(`Failed to get vehicle data: ${error.message}`);
+        }
+    }
+
+    /**
+     * Send a command to a vehicle.
+     * Generic method for POST /api/1/vehicles/{id}/command/{command}
+     */
+    async sendCommand(vehicleId: string, command: string, body: Record<string, any> = {}): Promise<any> {
+        const token = await this.getAccessToken();
+
+        try {
+            const response = await axios.post(
+                `${BASE_URL}/api/1/vehicles/${vehicleId}/command/${command}`,
+                body,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                }
+            );
+
+            return response.data.response;
+        } catch (error: any) {
+            const msg = error.response?.data?.error ?? error.message;
+            throw new Error(`Command '${command}' failed: ${msg}`);
+        }
+    }
+
+    /**
+     * Get nearby charging sites for a vehicle.
+     */
+    async getNearbyCharging(vehicleId: string): Promise<any> {
+        const token = await this.getAccessToken();
+
+        try {
+            const response = await axios.get(
+                `${BASE_URL}/api/1/vehicles/${vehicleId}/nearby_charging_sites`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                }
+            );
+
+            return response.data.response;
+        } catch (error: any) {
+            throw new Error(`Failed to get nearby charging sites: ${error.message}`);
         }
     }
 }
