@@ -294,32 +294,6 @@ export class UserTeslaService {
     }
 
     /**
-     * Send a command to a vehicle.
-     * Generic method for POST /api/1/vehicles/{id}/command/{command}
-     */
-    async sendCommand(vehicleId: string, command: string, body: Record<string, any> = {}): Promise<any> {
-        const token = await this.getAccessToken();
-
-        try {
-            const response = await axios.post(
-                `${BASE_URL}/api/1/vehicles/${vehicleId}/command/${command}`,
-                body,
-                {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json',
-                    },
-                }
-            );
-
-            return response.data.response;
-        } catch (error: any) {
-            const msg = error.response?.data?.error ?? error.message;
-            throw new Error(`Command '${command}' failed: ${msg}`);
-        }
-    }
-
-    /**
      * Get nearby charging sites for a vehicle.
      */
     async getNearbyCharging(vehicleId: string): Promise<any> {

@@ -184,83 +184,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["vehicle_id"]
         }
       },
-      // --- Command tools ---
-      {
-        name: "lock_unlock",
-        description: "Lock or unlock your Tesla.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            vehicle_id: { type: "string", description: "Vehicle (id, vehicle_id, or vin)" },
-            action: { type: "string", enum: ["lock", "unlock"], description: "lock or unlock" }
-          },
-          required: ["vehicle_id", "action"]
-        }
-      },
-      {
-        name: "climate_control",
-        description: "Start/stop your Tesla's climate (AC/heat), or set the temperature.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            vehicle_id: { type: "string", description: "Vehicle (id, vehicle_id, or vin)" },
-            action: { type: "string", enum: ["start", "stop"], description: "start or stop climate" },
-            driver_temp: { type: "number", description: "Driver side temperature in Celsius (e.g. 21)" },
-            passenger_temp: { type: "number", description: "Passenger side temperature in Celsius (e.g. 21)" }
-          },
-          required: ["vehicle_id", "action"]
-        }
-      },
-      {
-        name: "charge_control",
-        description: "Start/stop charging or set the charge limit for your Tesla.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            vehicle_id: { type: "string", description: "Vehicle (id, vehicle_id, or vin)" },
-            action: { type: "string", enum: ["start", "stop", "set_limit"], description: "start, stop, or set_limit" },
-            limit: { type: "number", description: "Charge limit percentage (50-100), required when action is set_limit" }
-          },
-          required: ["vehicle_id", "action"]
-        }
-      },
-      {
-        name: "open_trunk",
-        description: "Open your Tesla's rear trunk or front trunk (frunk).",
-        inputSchema: {
-          type: "object",
-          properties: {
-            vehicle_id: { type: "string", description: "Vehicle (id, vehicle_id, or vin)" },
-            which: { type: "string", enum: ["rear", "front"], description: "rear trunk or front trunk (frunk)" }
-          },
-          required: ["vehicle_id", "which"]
-        }
-      },
-      {
-        name: "honk_flash",
-        description: "Honk the horn or flash the lights on your Tesla to find it.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            vehicle_id: { type: "string", description: "Vehicle (id, vehicle_id, or vin)" },
-            action: { type: "string", enum: ["honk", "flash"], description: "honk horn or flash lights" }
-          },
-          required: ["vehicle_id", "action"]
-        }
-      },
-      // --- Nice-to-have tools ---
-      {
-        name: "send_navigation",
-        description: "Send a destination address to your Tesla's navigation system.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            vehicle_id: { type: "string", description: "Vehicle (id, vehicle_id, or vin)" },
-            address: { type: "string", description: "Destination address" }
-          },
-          required: ["vehicle_id", "address"]
-        }
-      },
       {
         name: "nearby_charging",
         description: "Find nearby Superchargers and destination chargers for your Tesla.",
@@ -268,42 +191,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: { vehicle_id: { type: "string", description: "Vehicle (id, vehicle_id, or vin)" } },
           required: ["vehicle_id"]
-        }
-      },
-      {
-        name: "sentry_mode",
-        description: "Turn sentry mode on or off for your Tesla.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            vehicle_id: { type: "string", description: "Vehicle (id, vehicle_id, or vin)" },
-            enabled: { type: "boolean", description: "true to enable, false to disable" }
-          },
-          required: ["vehicle_id", "enabled"]
-        }
-      },
-      {
-        name: "window_control",
-        description: "Vent (open slightly) or close all windows on your Tesla.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            vehicle_id: { type: "string", description: "Vehicle (id, vehicle_id, or vin)" },
-            action: { type: "string", enum: ["vent", "close"], description: "vent or close windows" }
-          },
-          required: ["vehicle_id", "action"]
-        }
-      },
-      {
-        name: "media_control",
-        description: "Control media playback in your Tesla: play/pause, next/previous track, or adjust volume.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            vehicle_id: { type: "string", description: "Vehicle (id, vehicle_id, or vin)" },
-            action: { type: "string", enum: ["toggle_playback", "next_track", "prev_track", "volume_up", "volume_down"], description: "Media action" }
-          },
-          required: ["vehicle_id", "action"]
         }
       }
     ]
@@ -366,8 +253,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       ).join('\n\n');
       return { content: [{ type: "text", text: `Found ${vehicles.length} vehicles:\n\n${debugInfo}` }] };
     }
-
-    // ========== Data Tools ==========
 
     case "get_vehicle_location": {
       const vid = String(request.params.arguments?.vehicle_id);
@@ -476,91 +361,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: "text", text: lines.join('\n') }] };
     }
 
-    // ========== Command Tools ==========
-
-    case "lock_unlock": {
-      const vid = String(request.params.arguments?.vehicle_id);
-      const action = String(request.params.arguments?.action);
-      const vehicle = await findVehicle(vid);
-      const name = vehicle.display_name || "Tesla";
-      const command = action === 'unlock' ? 'door_unlock' : 'door_lock';
-      await teslaService.sendCommand(vid, command);
-      return { content: [{ type: "text", text: `${name} is now ${action === 'unlock' ? 'unlocked' : 'locked'}.` }] };
-    }
-
-    case "climate_control": {
-      const vid = String(request.params.arguments?.vehicle_id);
-      const action = String(request.params.arguments?.action);
-      const driverTemp = request.params.arguments?.driver_temp as number | undefined;
-      const passengerTemp = request.params.arguments?.passenger_temp as number | undefined;
-      const vehicle = await findVehicle(vid);
-      const name = vehicle.display_name || "Tesla";
-
-      if (driverTemp != null || passengerTemp != null) {
-        const dt = driverTemp ?? passengerTemp ?? 21;
-        const pt = passengerTemp ?? driverTemp ?? 21;
-        await teslaService.sendCommand(vid, 'set_temps', { driver_temp: dt, passenger_temp: pt });
-      }
-
-      const command = action === 'start' ? 'auto_conditioning_start' : 'auto_conditioning_stop';
-      await teslaService.sendCommand(vid, command);
-      return { content: [{ type: "text", text: `${name} climate ${action === 'start' ? 'started' : 'stopped'}.` + (driverTemp != null ? ` Temperature set to ${driverTemp}°C.` : '') }] };
-    }
-
-    case "charge_control": {
-      const vid = String(request.params.arguments?.vehicle_id);
-      const action = String(request.params.arguments?.action);
-      const limit = request.params.arguments?.limit as number | undefined;
-      const vehicle = await findVehicle(vid);
-      const name = vehicle.display_name || "Tesla";
-
-      if (action === 'set_limit') {
-        if (limit == null || limit < 50 || limit > 100) throw new Error("Charge limit must be between 50 and 100");
-        await teslaService.sendCommand(vid, 'set_charge_limit', { percent: limit });
-        return { content: [{ type: "text", text: `${name} charge limit set to ${limit}%.` }] };
-      }
-
-      const command = action === 'start' ? 'charge_start' : 'charge_stop';
-      await teslaService.sendCommand(vid, command);
-      return { content: [{ type: "text", text: `${name} charging ${action === 'start' ? 'started' : 'stopped'}.` }] };
-    }
-
-    case "open_trunk": {
-      const vid = String(request.params.arguments?.vehicle_id);
-      const which = String(request.params.arguments?.which);
-      const vehicle = await findVehicle(vid);
-      const name = vehicle.display_name || "Tesla";
-      await teslaService.sendCommand(vid, 'actuate_trunk', { which_trunk: which });
-      return { content: [{ type: "text", text: `${name} ${which === 'front' ? 'frunk' : 'rear trunk'} opened.` }] };
-    }
-
-    case "honk_flash": {
-      const vid = String(request.params.arguments?.vehicle_id);
-      const action = String(request.params.arguments?.action);
-      const vehicle = await findVehicle(vid);
-      const name = vehicle.display_name || "Tesla";
-      const command = action === 'honk' ? 'honk_horn' : 'flash_lights';
-      await teslaService.sendCommand(vid, command);
-      return { content: [{ type: "text", text: `${name} ${action === 'honk' ? 'horn honked' : 'lights flashed'}.` }] };
-    }
-
-    // ========== Nice-to-Have Tools ==========
-
-    case "send_navigation": {
-      const vid = String(request.params.arguments?.vehicle_id);
-      const address = String(request.params.arguments?.address);
-      const vehicle = await findVehicle(vid);
-      const name = vehicle.display_name || "Tesla";
-      if (!address) throw new Error("address is required");
-      await teslaService.sendCommand(vid, 'navigation_request', {
-        type: 'share_ext_content_raw',
-        locale: 'en-US',
-        timestamp_ms: Date.now().toString(),
-        value: { 'android.intent.extra.TEXT': address }
-      });
-      return { content: [{ type: "text", text: `Navigation to "${address}" sent to ${name}.` }] };
-    }
-
     case "nearby_charging": {
       const vid = String(request.params.arguments?.vehicle_id);
       const vehicle = await findVehicle(vid);
@@ -584,56 +384,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         ...(dcLines.length > 0 ? dcLines : ['  None nearby']),
       ];
       return { content: [{ type: "text", text: lines.join('\n') }] };
-    }
-
-    case "sentry_mode": {
-      const vid = String(request.params.arguments?.vehicle_id);
-      const enabled = Boolean(request.params.arguments?.enabled);
-      const vehicle = await findVehicle(vid);
-      const name = vehicle.display_name || "Tesla";
-      await teslaService.sendCommand(vid, 'set_sentry_mode', { on: enabled });
-      return { content: [{ type: "text", text: `${name} sentry mode ${enabled ? 'enabled' : 'disabled'}.` }] };
-    }
-
-    case "window_control": {
-      const vid = String(request.params.arguments?.vehicle_id);
-      const action = String(request.params.arguments?.action);
-      const vehicle = await findVehicle(vid);
-      const name = vehicle.display_name || "Tesla";
-
-      const vData = await teslaService.getVehicleData(String(vehicle.id), true);
-      const lat = vData.latitude ?? vData.native_latitude ?? 0;
-      const lon = vData.longitude ?? vData.native_longitude ?? 0;
-
-      await teslaService.sendCommand(String(vehicle.id), 'window_control', { command: action, lat, lon });
-      return { content: [{ type: "text", text: `${name} windows ${action === 'vent' ? 'vented' : 'closed'}.` }] };
-    }
-
-    case "media_control": {
-      const vid = String(request.params.arguments?.vehicle_id);
-      const action = String(request.params.arguments?.action);
-      const vehicle = await findVehicle(vid);
-      const name = vehicle.display_name || "Tesla";
-
-      const mediaCommands: Record<string, string> = {
-        'toggle_playback': 'media_toggle_playback',
-        'next_track': 'media_next_track',
-        'prev_track': 'media_prev_track',
-        'volume_up': 'adjust_volume',
-        'volume_down': 'adjust_volume',
-      };
-      const command = mediaCommands[action];
-      if (!command) throw new Error(`Unknown media action: ${action}`);
-
-      if (action === 'volume_up') await teslaService.sendCommand(vid, command, { volume: 1 });
-      else if (action === 'volume_down') await teslaService.sendCommand(vid, command, { volume: -1 });
-      else await teslaService.sendCommand(vid, command);
-
-      const labels: Record<string, string> = {
-        'toggle_playback': 'playback toggled', 'next_track': 'skipped to next track',
-        'prev_track': 'went to previous track', 'volume_up': 'volume increased', 'volume_down': 'volume decreased',
-      };
-      return { content: [{ type: "text", text: `${name}: ${labels[action] ?? action}.` }] };
     }
 
     default:
