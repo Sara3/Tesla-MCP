@@ -186,16 +186,59 @@ export class UserTeslaService {
         const token = await this.getAccessToken();
 
         try {
-            const baseEndpoints = 'charge_state;climate_state;vehicle_state;vehicle_config;gui_settings';
-            const endpoints = includeLocation
-                ? `drive_state;location_data;${baseEndpoints}`
-                : `drive_state;${baseEndpoints}`;
+            const baseEndpoints = 'drive_state;charge_state;climate_state;vehicle_state;vehicle_config;gui_settings';
+            let endpoints = baseEndpoints;
+            let locationFallback = false;
+
+            if (includeLocation) {
+                // Try with location_data first (requires vehicle_location scope)
+                try {
+                    const locResponse = await axios.get(`${BASE_URL}/api/1/vehicles/${vehicleId}/vehicle_data?endpoints=${encodeURIComponent(`location_data;${baseEndpoints}`)}`, {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json',
+                        },
+                    });
+                    const locData = locResponse.data?.response;
+                    if (locData) {
+                        const driveState = locData.drive_state;
+                        const locationData = locData.location_data;
+                        const result: any = { ...locData };
+                        result._debug_fields_present = Object.keys(locData).filter((k: string) => locData[k] != null && typeof locData[k] === 'object');
+                        if (driveState) {
+                            result.latitude = driveState.latitude; result.longitude = driveState.longitude;
+                            result.heading = driveState.heading; result.speed = driveState.speed;
+                            result.shift_state = driveState.shift_state;
+                            result.native_latitude = driveState.native_latitude; result.native_longitude = driveState.native_longitude;
+                        }
+                        if (locationData) {
+                            result.latitude = result.latitude ?? locationData.latitude;
+                            result.longitude = result.longitude ?? locationData.longitude;
+                            result.native_latitude = result.native_latitude ?? locationData.native_latitude;
+                            result.native_longitude = result.native_longitude ?? locationData.native_longitude;
+                        }
+                        return result;
+                    }
+                } catch (locError: any) {
+                    if (locError.response?.status === 403) {
+                        locationFallback = true;
+                    } else {
+                        throw locError;
+                    }
+                }
+            }
+
             const response = await axios.get(`${BASE_URL}/api/1/vehicles/${vehicleId}/vehicle_data?endpoints=${encodeURIComponent(endpoints)}`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json',
                 },
             });
+
+            if (locationFallback) {
+                const data = response.data?.response ?? {};
+                data._location_scope_missing = true;
+            }
 
             const data = response.data?.response;
             if (!data) {

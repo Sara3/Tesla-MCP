@@ -382,8 +382,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const mapsUrl = `https://www.google.com/maps?q=${lat},${lon}`;
         return { content: [{ type: "text", text: `${name} location:\n• Latitude: ${lat}\n• Longitude: ${lon}\n• Map: ${mapsUrl}\n• Heading: ${data.heading ?? "—"}\n• Speed: ${data.speed ?? "—"}\n• Shift: ${data.shift_state ?? "—"}` }] };
       }
+      if (data._location_scope_missing) {
+        return { content: [{ type: "text", text: `Location not available for ${name}.\n\nYour token is missing the **vehicle_location** scope. To fix:\n1. Go to developer.tesla.com and open your app\n2. Add **vehicle_location** to the allowed scopes\n3. Re-authenticate (run: npm run get-token)\n4. Restart the MCP server` }] };
+      }
       const debugFields = data._debug_fields_present ?? Object.keys(data).slice(0, 20);
-      return { content: [{ type: "text", text: `Location not available for ${name}.\n\nPossible causes:\n• Vehicle may need wake_up first\n• "Allow Mobile Access" must be enabled in vehicle Settings > Safety\n• Location sharing icon should appear on the vehicle screen when fetched\n\nAPI returned these data sections: ${JSON.stringify(debugFields)}\ndrive_state present: ${!!data.drive_state}\nlocation_data present: ${!!data.location_data}` }] };
+      return { content: [{ type: "text", text: `Location not available for ${name}.\n\nPossible causes:\n• Vehicle may need wake_up first\n• "Allow Mobile Access" must be enabled in vehicle Settings > Safety\n\nAPI data sections: ${JSON.stringify(debugFields)}\ndrive_state: ${!!data.drive_state}, location_data: ${!!data.location_data}` }] };
     }
 
     case "get_battery_status": {
